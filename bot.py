@@ -1762,11 +1762,7 @@ async def commands_list(ctx):
         "`?serverbanner` `?botinfo`\n\n"
 
         "**Bot:**\n"
-        "`?ping` `?botstatus` `?status` `?uptime`\n\n"
-
-        "**Tickets:**\n"
-        "`?ticket` `?close` `?add` `?remove` "
-        "`?claim` `?rename`\n\n"
+        "`?ping` `?botstatus` `?status` `?uptime`\n\n
 
         "**Fun:**\n"
         "`?8ball` `?coinflip` `?dice` `?choose`\n\n"
@@ -1775,7 +1771,7 @@ async def commands_list(ctx):
         "`?poll` `?announce` `?suggest` `?feedback` `?report`\n\n"
 
         "**Sonstiges:**\n"
-        "`?raid` `?welcome` `?setwelcome` `?remind`"
+        `?welcome` `?setwelcome` `?remind`"
     )
 
 
