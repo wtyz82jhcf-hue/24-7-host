@@ -1,5 +1,7 @@
 import os
 import random
+import re
+import asyncio
 import discord
 
 CHANNEL_ID = 1533409789256925185
@@ -127,7 +129,48 @@ QUIZZES = [
     (["😡", "🔥"], "Wut"),
     (["😭", "💧"], "Weinen"),
     (["😎", "🕶️"], "Cool"),
+    (["🌹", "💐"], "Blumen"),
+    (["🌙", "⭐"], "Mond"),
+    (["☁️", "💧"], "Regen"),
+    (["🌞", "🔥"], "Hitze"),
+    (["🌊", "🐚"], "Meer"),
+    (["🌳", "🍎"], "Apfelbaum"),
+    (["🐭", "🧀"], "Maus"),
+    (["🐸", "💧"], "Frosch"),
+    (["🐙", "🌊"], "Oktopus"),
+    (["🦀", "🏖️"], "Krabbe"),
+    (["🦓", "🌿"], "Zebra"),
+    (["🐯", "🌴"], "Tiger"),
+    (["🐺", "🌙"], "Wolf"),
+    (["🦉", "🌙"], "Eule"),
+    (["🦅", "☁️"], "Adler"),
+    (["🐞", "🌿"], "Marienkäfer"),
+    (["🌻", "🌞"], "Sonnenblume"),
+    (["🌹", "❤️"], "Rose"),
+    (["🍎", "🍏"], "Apfel"),
+    (["🍌", "🍎"], "Obst"),
+    (["🍓", "🍒"], "Beeren"),
+    (["🍋", "🥤"], "Limonade"),
+    (["🍉", "🍓"], "Früchte"),
+    (["🥛", "🍪"], "Milch und Kekse"),
+    (["🍿", "📺"], "Fernsehabend"),
+    (["🎮", "🖥️"], "Videospiel"),
+    (["🎬", "🎟️"], "Film"),
+    (["🎨", "🖼️"], "Kunst"),
+    (["📸", "📷"], "Fotografie"),
+    (["🎹", "🎼"], "Klaviermusik"),
+    (["🎸", "🥁"], "Band"),
+    (["🎤", "🎙️"], "Sänger"),
+    (["⚽", "🥅"], "Fußball"),
+    (["🏀", "⛹️"], "Basketball"),
+    (["🏐", "🏆"], "Volleyball"),
+    (["🎾", "🏟️"], "Tennis"),
+    (["🏊", "🏅"], "Schwimmen"),
+    (["🚴", "🏆"], "Radrennen"),
+    (["🏎️", "🏁"], "Rennsport"),
+    (["🥊", "🏆"], "Boxen"),
 ]
+
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -137,9 +180,55 @@ bot = discord.Client(intents=intents)
 current_quiz = None
 quiz_message = None
 
+# Für jeden Nutzer wird die letzte Richtig-/Falsch-Nachricht gespeichert.
+last_correct_messages = {}
+last_wrong_messages = {}
+
+quiz_lock = asyncio.Lock()
+
 
 def normalize(text):
-    return text.lower().strip()
+    text = text.lower().strip()
+
+    replacements = {
+        "ä": "ae",
+        "ö": "oe",
+        "ü": "ue",
+        "ß": "ss",
+    }
+
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+
+    text = re.sub(r"[^a-z0-9]+", "", text)
+
+    return text
+
+
+def create_quiz_embed(emojis):
+    embed = discord.Embed(
+        title="🎯 Emoji-Quiz",
+        description=(
+            "**Was bedeutet diese Emoji-Kombination?**\n\n"
+            f"# {' '.join(emojis)}\n\n"
+            "💬 Schreibe deine Antwort in den Chat!"
+        ),
+        color=discord.Color.blurple()
+    )
+
+    embed.set_footer(text="Viel Glück! 🍀")
+
+    return embed
+
+
+async def delete_message_safe(message):
+    if message is None:
+        return
+
+    try:
+        await message.delete()
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        pass
 
 
 async def send_new_quiz():
@@ -148,23 +237,21 @@ async def send_new_quiz():
     channel = bot.get_channel(CHANNEL_ID)
 
     if channel is None:
-        print("Kanal wurde nicht gefunden.")
+        print("❌ Kanal wurde nicht gefunden.")
         return
 
     current_quiz = random.choice(QUIZZES)
 
-    emojis = " ".join(current_quiz[0])
+    emojis = current_quiz[0]
 
-    quiz_message = await channel.send(
-        "**Emoji-Quiz - was bedeutet diese Emoji-Kombination?**\n\n"
-        "Bitte errate die Bedeutung der Emojis!\n\n"
-        f"{emojis}"
-    )
+    embed = create_quiz_embed(emojis)
+
+    quiz_message = await channel.send(embed=embed)
 
 
 @bot.event
 async def on_ready():
-    print(f"Bot ist online als {bot.user}")
+    print(f"✅ Bot ist online als {bot.user}")
 
     if current_quiz is None:
         await send_new_quiz()
@@ -174,52 +261,64 @@ async def on_ready():
 async def on_message(message):
     global current_quiz, quiz_message
 
-    # Eigene Nachrichten ignorieren
     if message.author == bot.user:
         return
 
-    # Nur im Quiz-Kanal reagieren
     if message.channel.id != CHANNEL_ID:
         return
 
-    # Kein aktives Quiz
     if current_quiz is None:
         return
 
     answer = normalize(message.content)
     correct_answer = normalize(current_quiz[1])
 
+    user_id = message.author.id
+
+    # =========================
     # RICHTIGE ANTWORT
+    # =========================
+
     if answer == correct_answer:
 
-        # Erfolgsmeldung
-        await message.channel.send(
+        # Die vorherige Richtig-Nachricht dieses Nutzers löschen
+        if user_id in last_correct_messages:
+            await delete_message_safe(last_correct_messages[user_id])
+
+        correct_message = await message.channel.send(
             f"✅ Richtig {message.author.mention}!"
         )
 
-        # Altes Quiz löschen
-        if quiz_message is not None:
-            try:
-                await quiz_message.delete()
-            except discord.NotFound:
-                pass
-            except discord.Forbidden:
-                print("Keine Berechtigung, das Quiz zu löschen.")
-            except discord.HTTPException:
-                pass
+        # Neue Richtig-Nachricht speichern
+        last_correct_messages[user_id] = correct_message
 
-        # Neues Quiz vorbereiten
+        # Altes Quiz löschen
+        await delete_message_safe(quiz_message)
+
+        # Neues Quiz
         current_quiz = None
         quiz_message = None
 
-        # Neues Quiz senden
-        await send_new_quiz()
+        async with quiz_lock:
+            if current_quiz is None:
+                await send_new_quiz()
 
+    # =========================
     # FALSCHE ANTWORT
+    # =========================
+
     else:
-        await message.channel.send(
+
+        # Die vorherige Falsch-Nachricht dieses Nutzers löschen
+        if user_id in last_wrong_messages:
+            await delete_message_safe(last_wrong_messages[user_id])
+
+        wrong_message = await message.channel.send(
             "❌ Leider falsch! Nächster Versuch, vielleicht wird's dann!"
         )
+
+        # Neue Falsch-Nachricht speichern
+        last_wrong_messages[user_id] = wrong_message
 
 
 TOKEN = os.environ["DISCORD_TOKEN"]
