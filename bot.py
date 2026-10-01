@@ -152,7 +152,7 @@ QUIZZES = [
     (["🍋", "🥤"], "Limonade"),
     (["🍉", "🍓"], "Früchte"),
     (["🥛", "🍪"], "Milch und Kekse"),
-    (["🍿", "📺"], "Fernsehabend"),
+    (["🍿", "📺"], "Fernsehnabend"),
     (["🎮", "🖥️"], "Videospiel"),
     (["🎬", "🎟️"], "Film"),
     (["🎨", "🖼️"], "Kunst"),
