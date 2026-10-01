@@ -172,10 +172,10 @@ bot = discord.Client(intents=intents)
 current_quiz = None
 quiz_message = None
 
-# Letzte Nachricht je Nutzer:
-last_correct_messages = {}
-last_wrong_messages = {}
+# Pro Nutzer wird nur die letzte Ergebnis-Nachricht gespeichert.
+last_result_messages = {}
 
+# Verhindert Probleme, wenn gleichzeitig mehrere Antworten kommen.
 quiz_lock = asyncio.Lock()
 
 
@@ -206,9 +206,9 @@ async def safe_delete(message):
     except discord.NotFound:
         pass
     except discord.Forbidden:
-        print("❌ Bot darf diese Nachricht nicht löschen.")
-    except discord.HTTPException:
-        pass
+        print("❌ Keine Berechtigung zum Löschen der Nachricht!")
+    except discord.HTTPException as error:
+        print(f"❌ Discord-Fehler beim Löschen: {error}")
 
 
 def create_quiz_embed(emojis):
@@ -232,7 +232,7 @@ async def send_new_quiz():
     channel = bot.get_channel(CHANNEL_ID)
 
     if channel is None:
-        print("❌ Kanal wurde nicht gefunden.")
+        print("❌ Kanal wurde nicht gefunden!")
         return
 
     current_quiz = random.choice(QUIZZES)
@@ -243,7 +243,7 @@ async def send_new_quiz():
 
     quiz_message = await channel.send(embed=embed)
 
-    print("✅ Neues Quiz gesendet.")
+    print(f"✅ Neues Quiz: {current_quiz[1]}")
 
 
 @bot.event
@@ -258,72 +258,74 @@ async def on_ready():
 async def on_message(message):
     global current_quiz, quiz_message
 
-    # Bot ignoriert eigene Nachrichten
+    # Eigene Nachrichten ignorieren
     if message.author == bot.user:
         return
 
-    # Nur im Quiz-Kanal
+    # Nur im Quiz-Kanal reagieren
     if message.channel.id != CHANNEL_ID:
         return
 
-    # Kein Quiz vorhanden
+    # Wenn kein Quiz aktiv ist
     if current_quiz is None:
         return
 
     answer = normalize(message.content)
     correct_answer = normalize(current_quiz[1])
+
     user_id = message.author.id
     mention = message.author.mention
 
     # =====================================================
-    # RICHTIG
+    # RICHTIGE ANTWORT
     # =====================================================
     if answer == correct_answer:
 
-        # Alte Richtig-Nachricht dieses Users löschen
-        old_correct = last_correct_messages.get(user_id)
+        # Alte Ergebnis-Nachricht des Users löschen
+        old_result = last_result_messages.get(user_id)
 
-        if old_correct is not None:
-            await safe_delete(old_correct)
+        if old_result is not None:
+            await safe_delete(old_result)
 
         # Neue Richtig-Nachricht
-        new_correct = await message.channel.send(
+        new_result = await message.channel.send(
             f"✅ {mention} Richtig!"
         )
 
-        # Speichern
-        last_correct_messages[user_id] = new_correct
+        # Neue Ergebnis-Nachricht speichern
+        last_result_messages[user_id] = new_result
 
         # Altes Quiz löschen
         old_quiz = quiz_message
+
         quiz_message = None
         current_quiz = None
 
         await safe_delete(old_quiz)
 
-        # Neues Quiz senden
+        # Neues Quiz starten
         async with quiz_lock:
             if current_quiz is None:
                 await send_new_quiz()
 
     # =====================================================
-    # FALSCH
+    # FALSCHE ANTWORT
     # =====================================================
     else:
 
-        # Alte Falsch-Nachricht dieses Users löschen
-        old_wrong = last_wrong_messages.get(user_id)
+        # Alte Ergebnis-Nachricht des Users löschen
+        old_result = last_result_messages.get(user_id)
 
-        if old_wrong is not None:
-            await safe_delete(old_wrong)
+        if old_result is not None:
+            await safe_delete(old_result)
 
         # Neue Falsch-Nachricht
-        new_wrong = await message.channel.send(
+        new_result = await message.channel.send(
             f"❌ {mention} Leider falsch! Nächster Versuch, vielleicht wird's dann!"
         )
 
-        # Speichern
-        last_wrong_messages[user_id] = new_wrong
+        # Neue Ergebnis-Nachricht speichern
+        last_result_messages[user_id] = new_result
 
 
 TOKEN = os.environ["DISCORD_TOKEN"]
