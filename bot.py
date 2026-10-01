@@ -102,7 +102,7 @@ QUIZZES = [
     (["🌮", "🌶️"], "Taco"),
     (["🍩", "☕"], "Donut"),
     (["🍫", "🥛"], "Schokolade"),
-    (["🍓", "🍰"], "Erdbeerkuchen"),
+    (["🍓", "🍒"], "Beeren"),
     (["🍉", "☀️"], "Wassermelone"),
     (["🎁", "🎀"], "Geschenk"),
     (["🎈", "🎉"], "Party"),
@@ -129,39 +129,6 @@ QUIZZES = [
     (["😡", "🔥"], "Wut"),
     (["😭", "💧"], "Weinen"),
     (["😎", "🕶️"], "Cool"),
-    (["🌹", "💐"], "Blumen"),
-    (["🌙", "⭐"], "Mond"),
-    (["☁️", "💧"], "Regen"),
-    (["🌞", "🔥"], "Hitze"),
-    (["🌊", "🐚"], "Meer"),
-    (["🌳", "🍎"], "Apfelbaum"),
-    (["🐭", "🧀"], "Maus"),
-    (["🐸", "💧"], "Frosch"),
-    (["🐙", "🌊"], "Oktopus"),
-    (["🦀", "🏖️"], "Krabbe"),
-    (["🦓", "🌿"], "Zebra"),
-    (["🐯", "🌴"], "Tiger"),
-    (["🐺", "🌙"], "Wolf"),
-    (["🦉", "🌙"], "Eule"),
-    (["🦅", "☁️"], "Adler"),
-    (["🐞", "🌿"], "Marienkäfer"),
-    (["🌻", "🌞"], "Sonnenblume"),
-    (["🍎", "🍏"], "Apfel"),
-    (["🍌", "🍎"], "Obst"),
-    (["🍓", "🍒"], "Beeren"),
-    (["🍋", "🥤"], "Limonade"),
-    (["🍉", "🍓"], "Früchte"),
-    (["🥛", "🍪"], "Milch und Kekse"),
-    (["🍿", "📺"], "Fernsehnabend"),
-    (["🎮", "🖥️"], "Videospiel"),
-    (["🎬", "🎟️"], "Film"),
-    (["🎨", "🖼️"], "Kunst"),
-    (["📸", "📷"], "Fotografie"),
-    (["🎸", "🥁"], "Band"),
-    (["🏐", "🏆"], "Volleyball"),
-    (["🎾", "🏟️"], "Tennis"),
-    (["🏎️", "🏁"], "Rennsport"),
-    (["🥊", "🏆"], "Boxen"),
 ]
 
 intents = discord.Intents.default()
@@ -172,10 +139,11 @@ bot = discord.Client(intents=intents)
 current_quiz = None
 quiz_message = None
 
-# Pro Nutzer wird nur die letzte Ergebnis-Nachricht gespeichert.
+# Hier wird für JEDEN Nutzer die letzte Ergebnis-Nachricht gespeichert.
 last_result_messages = {}
 
-# Verhindert Probleme, wenn gleichzeitig mehrere Antworten kommen.
+# Verhindert, dass mehrere richtige Antworten gleichzeitig
+# mehrere neue Quizze erzeugen.
 quiz_lock = asyncio.Lock()
 
 
@@ -206,9 +174,9 @@ async def safe_delete(message):
     except discord.NotFound:
         pass
     except discord.Forbidden:
-        print("❌ Keine Berechtigung zum Löschen der Nachricht!")
+        print("❌ Der Bot darf diese Nachricht nicht löschen!")
     except discord.HTTPException as error:
-        print(f"❌ Discord-Fehler beim Löschen: {error}")
+        print(f"❌ Fehler beim Löschen: {error}")
 
 
 def create_quiz_embed(emojis):
@@ -237,9 +205,7 @@ async def send_new_quiz():
 
     current_quiz = random.choice(QUIZZES)
 
-    emojis = current_quiz[0]
-
-    embed = create_quiz_embed(emojis)
+    embed = create_quiz_embed(current_quiz[0])
 
     quiz_message = await channel.send(embed=embed)
 
@@ -256,13 +222,14 @@ async def on_ready():
 
 @bot.event
 async def on_message(message):
-    global current_quiz, quiz_message
+    global current_quiz
+    global quiz_message
 
-    # Eigene Nachrichten ignorieren
+    # Bot ignoriert seine eigenen Nachrichten
     if message.author == bot.user:
         return
 
-    # Nur im Quiz-Kanal reagieren
+    # Nur der Quiz-Kanal
     if message.channel.id != CHANNEL_ID:
         return
 
@@ -279,23 +246,24 @@ async def on_message(message):
     # =====================================================
     # RICHTIGE ANTWORT
     # =====================================================
+
     if answer == correct_answer:
 
-        # Alte Ergebnis-Nachricht des Users löschen
+        # Die alte Ergebnis-Nachricht DIESES Nutzers löschen.
         old_result = last_result_messages.get(user_id)
 
         if old_result is not None:
             await safe_delete(old_result)
 
-        # Neue Richtig-Nachricht
+        # Neue Richtig-Nachricht senden.
         new_result = await message.channel.send(
             f"✅ {mention} Richtig!"
         )
 
-        # Neue Ergebnis-Nachricht speichern
+        # Neue Nachricht für DIESEN Nutzer speichern.
         last_result_messages[user_id] = new_result
 
-        # Altes Quiz löschen
+        # Das alte Quiz löschen.
         old_quiz = quiz_message
 
         quiz_message = None
@@ -303,7 +271,7 @@ async def on_message(message):
 
         await safe_delete(old_quiz)
 
-        # Neues Quiz starten
+        # Neues Quiz erstellen.
         async with quiz_lock:
             if current_quiz is None:
                 await send_new_quiz()
@@ -311,20 +279,21 @@ async def on_message(message):
     # =====================================================
     # FALSCHE ANTWORT
     # =====================================================
+
     else:
 
-        # Alte Ergebnis-Nachricht des Users löschen
+        # Die alte Ergebnis-Nachricht DIESES Nutzers löschen.
         old_result = last_result_messages.get(user_id)
 
         if old_result is not None:
             await safe_delete(old_result)
 
-        # Neue Falsch-Nachricht
+        # Neue Falsch-Nachricht senden.
         new_result = await message.channel.send(
             f"❌ {mention} Leider falsch! Nächster Versuch, vielleicht wird's dann!"
         )
 
-        # Neue Ergebnis-Nachricht speichern
+        # Für DIESEN Nutzer speichern.
         last_result_messages[user_id] = new_result
 
 
