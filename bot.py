@@ -45,7 +45,7 @@ QUIZZES = [
     (["🦄", "✨"], "Einhorn"),
     (["🐲", "🔥"], "Drache"),
     (["🕷️", "🕸️"], "Spinne"),
-    (["🐢", "🐢"], "Schildkröte"),
+    (["🐢", "🏁"], "Schildkröte"),
     (["🐰", "🥕"], "Hase"),
     (["🐮", "🥛"], "Kuh"),
     (["🐷", "🌾"], "Schwein"),
@@ -102,7 +102,6 @@ QUIZZES = [
     (["🍫", "🥛"], "Schokolade"),
     (["🍓", "🍰"], "Erdbeerkuchen"),
     (["🍉", "☀️"], "Wassermelone"),
-    (["🍌", "🥛"], "Bananenmilch"),
     (["🎁", "🎀"], "Geschenk"),
     (["🎈", "🎉"], "Party"),
     (["💰", "🏦"], "Geld"),
@@ -175,36 +174,48 @@ async def on_ready():
 async def on_message(message):
     global current_quiz, quiz_message
 
+    # Eigene Nachrichten ignorieren
     if message.author == bot.user:
         return
 
+    # Nur im Quiz-Kanal reagieren
     if message.channel.id != CHANNEL_ID:
         return
 
+    # Kein aktives Quiz
     if current_quiz is None:
         return
 
     answer = normalize(message.content)
     correct_answer = normalize(current_quiz[1])
 
+    # RICHTIGE ANTWORT
     if answer == correct_answer:
+
+        # Erfolgsmeldung
         await message.channel.send(
-            f"✅ Richtig, {message.author.mention}!"
+            f"✅ Richtig {message.author.mention}!"
         )
 
+        # Altes Quiz löschen
         if quiz_message is not None:
             try:
                 await quiz_message.delete()
             except discord.NotFound:
                 pass
             except discord.Forbidden:
-                print("Keine Berechtigung zum Löschen.")
+                print("Keine Berechtigung, das Quiz zu löschen.")
+            except discord.HTTPException:
+                pass
 
+        # Neues Quiz vorbereiten
         current_quiz = None
         quiz_message = None
 
+        # Neues Quiz senden
         await send_new_quiz()
 
+    # FALSCHE ANTWORT
     else:
         await message.channel.send(
             "❌ Leider falsch! Nächster Versuch, vielleicht wird's dann!"
