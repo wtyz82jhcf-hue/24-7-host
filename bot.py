@@ -1,4 +1,3 @@
-python
 import os
 import random
 import discord
@@ -60,7 +59,6 @@ async def send_new_quiz():
         return
 
     current_quiz = random.choice(QUIZZES)
-
     emojis = " ".join(current_quiz[0])
 
     await channel.send(
