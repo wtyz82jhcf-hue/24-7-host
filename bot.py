@@ -1,187 +1,121 @@
-const {
-    Client,
-    GatewayIntentBits,
-    Events
-} = require("discord.js");
+```python
+import os
+import random
+import discord
 
-const client = new Client({
-    intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
-    ]
-});
+# Discord-Kanal
+CHANNEL_ID = 1533409789256925185
 
-// ===============================
-// EINSTELLUNGEN
-// ===============================
+# Emoji-Rätsel
+QUIZZES = [
+    (["🍕", "👨‍🍳", "🔥", "🍅", "🧀", "🍴"], "Pizza"),
+    (["🌧️", "☀️", "🌈", "☁️", "💧", "🌤️"], "Regenbogen"),
+    (["🐶", "🏠", "🦴", "🚪", "🐕", "🌳"], "Hundehütte"),
+    (["🍎", "📱", "💻", "⌚", "🎧", "📲"], "Apple"),
+    (["🌙", "⭐", "🌌", "😴", "🛏️", "🌃"], "Nacht"),
+    (["🔥", "🚒", "👨‍🚒", "🏠", "💦", "🚨"], "Feuerwehr"),
+    (["🎬", "🍿", "🥤", "🪑", "🎟️", "📽️"], "Kino"),
+    (["✈️", "🌴", "🏖️", "☀️", "🧳", "🌊"], "Urlaub"),
+    (["⚽", "🥅", "👟", "🏟️", "🏆", "🧑‍⚽"], "Fußball"),
+    (["🐟", "🌊", "🎣", "🐠", "🪝", "⛵"], "Fischen"),
+    (["🍔", "🍟", "🥤", "🍗", "🌭", "🍕"], "Fast Food"),
+    (["🚗", "🛣️", "⛽", "🚦", "🗺️", "🚙"], "Autofahrt"),
+    (["📚", "✏️", "🏫", "🎒", "🧑‍🏫", "📖"], "Schule"),
+    (["🎄", "🎁", "⭐", "❄️", "🔔", "🎅"], "Weihnachten"),
+    (["🎃", "👻", "🕷️", "🍬", "🦇", "🕸️"], "Halloween"),
+    (["❤️", "💌", "🌹", "🥰", "💘", "💐"], "Liebe"),
+    (["🐱", "🐭", "🧀", "🏠", "🐾", "😺"], "Katze"),
+    (["🚀", "🌕", "👨‍🚀", "🪐", "⭐", "🌌"], "Weltraum"),
+    (["🏴‍☠️", "💰", "🚢", "🗺️", "⚓", "☠️"], "Piraten"),
+    (["👑", "🏰", "⚔️", "🐉", "🛡️", "🤴"], "König"),
+    (["🍿", "📺", "🛋️", "🎮", "🥤", "🏠"], "Gamingabend"),
+    (["🏖️", "🌴", "🥥", "🌊", "🩴", "😎"], "Strandurlaub"),
+    (["☕", "🥐", "🍞", "🌅", "📰", "🍳"], "Frühstück"),
+    (["🎂", "🎈", "🎁", "🥳", "🕯️", "🎉"], "Geburtstag"),
+    (["🚂", "🎫", "🧳", "🛤️", "🏙️", "🚉"], "Zugfahrt"),
+    (["🏀", "🏟️", "⛹️", "🏆", "👟", "🔥"], "Basketball"),
+    (["🎸", "🎤", "🥁", "🎹", "🎶", "🎵"], "Musik"),
+    (["🍦", "☀️", "🏖️", "😋", "🍓", "🍫"], "Eis"),
+    (["🐝", "🌼", "🌸", "🍯", "🌻", "🦋"], "Bienen"),
+    (["🌲", "🏕️", "🔥", "🌙", "🥾", "🏞️"], "Camping"),
+]
 
-const TOKEN = process.env.DISCORD_TOKEN;
+# Discord-Berechtigungen
+intents = discord.Intents.default()
+intents.message_content = True
 
-const CHANNEL_ID = "1533409789256925185";
+# Bot erstellen
+bot = discord.Client(intents=intents)
 
-// Wie lange gewartet werden soll, bevor das erste Quiz erscheint
-const START_DELAY = 3000;
+# Aktuelles Rätsel
+current_quiz = None
 
-// Emoji-Fragen
-// emoji = das, was angezeigt wird
-// answers = mögliche richtige Schreibweisen
-const quizzes = [
-    {
-        emoji: "🌧️☀️",
-        answers: ["regenbogen", "regenbogen"]
-    },
-    {
-        emoji: "🐝🍯",
-        answers: ["honig", "bienenhonig"]
-    },
-    {
-        emoji: "🌙⭐",
-        answers: ["nacht", "sternennacht"]
-    },
-    {
-        emoji: "🔥🚒",
-        answers: ["feuerwehr", "feuerwehrmann"]
-    },
-    {
-        emoji: "🍎📱",
-        answers: ["iphone", "apple"]
-    },
-    {
-        emoji: "🐟🌊",
-        answers: ["fisch", "fisch im meer"]
-    },
-    {
-        emoji: "☀️🌻",
-        answers: ["sonne", "sonnenblume"]
-    },
-    {
-        emoji: "❄️☃️",
-        answers: ["winter", "schnee"]
-    },
-    {
-        emoji: "🚗💨",
-        answers: ["schnelles auto", "rasendes auto"]
-    },
-    {
-        emoji: "🎂🎉",
-        answers: ["geburtstag", "geburtstagsfeier"]
-    },
-    {
-        emoji: "📚🏫",
-        answers: ["schule", "schulunterricht"]
-    },
-    {
-        emoji: "⚽🥅",
-        answers: ["fußball", "fussball"]
-    }
-];
 
-// ===============================
-// STATUS
-// ===============================
+def normalize(text):
+    return text.lower().strip()
 
-let currentQuiz = null;
-let currentQuizIndex = -1;
 
-// ===============================
-// HILFSFUNKTIONEN
-// ===============================
+async def send_new_quiz():
+    global current_quiz
 
-function normalize(text) {
-    return text
-        .toLowerCase()
-        .trim()
-        .replace(/[.!?,;:]/g, "");
-}
+    channel = bot.get_channel(CHANNEL_ID)
 
-function getRandomQuiz() {
-    let index;
+    if channel is None:
+        print("Kanal wurde nicht gefunden.")
+        return
 
-    // Verhindert, dass direkt dasselbe Quiz nochmal kommt
-    do {
-        index = Math.floor(Math.random() * quizzes.length);
-    } while (index === currentQuizIndex && quizzes.length > 1);
+    current_quiz = random.choice(QUIZZES)
 
-    currentQuizIndex = index;
-    return quizzes[index];
-}
-
-async function sendQuiz(channel) {
-    currentQuiz = getRandomQuiz();
+    emojis = " ".join(current_quiz[0])
 
     await channel.send(
-        `**Emoji-Quiz - was bedeutet diese Emoji-Kombination?**\n\n` +
-        `Bitte errate die Bedeutung folgender Emojis, indem du eine Nachricht in diesen Kanal sendest!\n\n` +
-        `${currentQuiz.emoji}`
-    );
-}
+        "**Emoji-Quiz - was bedeutet diese Emoji-Kombination?**\n\n"
+        "Bitte errate die Bedeutung folgender Emojis, "
+        "indem du eine Nachricht in diesen Kanal sendest!\n\n"
+        f"{emojis}"
+    )
 
-// ===============================
-// BOT START
-// ===============================
 
-client.once(Events.ClientReady, async (bot) => {
-    console.log(`Bot ist online als ${bot.user.tag}`);
+@bot.event
+async def on_ready():
+    print(f"Bot ist online als {bot.user}")
 
-    const channel = await bot.channels.fetch(CHANNEL_ID);
+    if current_quiz is None:
+        await send_new_quiz()
 
-    if (!channel) {
-        console.error("Kanal wurde nicht gefunden.");
-        return;
-    }
 
-    if (!channel.isTextBased()) {
-        console.error("Der angegebene Kanal ist kein Textkanal.");
-        return;
-    }
+@bot.event
+async def on_message(message):
+    global current_quiz
 
-    setTimeout(() => {
-        sendQuiz(channel);
-    }, START_DELAY);
-});
+    # Nachrichten vom Bot ignorieren
+    if message.author == bot.user:
+        return
 
-// ===============================
-// NACHRICHTEN ÜBERPRÜFEN
-// ===============================
+    # Nur den gewünschten Kanal verwenden
+    if message.channel.id != CHANNEL_ID:
+        return
 
-client.on(Events.MessageCreate, async (message) => {
+    # Falls noch kein Rätsel vorhanden ist
+    if current_quiz is None:
+        return
 
-    // Eigene Nachrichten ignorieren
-    if (message.author.bot) return;
+    answer = normalize(message.content)
+    correct_answer = normalize(current_quiz[1])
 
-    // Nur den angegebenen Kanal überwachen
-    if (message.channel.id !== CHANNEL_ID) return;
+    # Richtige Antwort
+    if answer == correct_answer:
+        await message.channel.send(
+            f"✅ Richtig, {message.author.mention}!"
+        )
 
-    // Falls noch kein Quiz aktiv ist
-    if (!currentQuiz) return;
+        # Neues Rätsel senden
+        await send_new_quiz()
 
-    const answer = normalize(message.content);
 
-    const isCorrect = currentQuiz.answers.some(
-        correctAnswer => normalize(correctAnswer) === answer
-    );
+# Token aus GitHub Secret holen
+TOKEN = os.environ["DISCORD_TOKEN"]
 
-    if (!isCorrect) return;
-
-    // Aktuelles Quiz abschließen
-    const solvedQuiz = currentQuiz;
-    currentQuiz = null;
-
-    await message.channel.send(
-        `🎉 **Richtig!** ${message.author} hat die Lösung gefunden!`
-    );
-
-    // Kurz warten und neues Quiz senden
-    setTimeout(() => {
-        sendQuiz(message.channel);
-    }, 2000);
-});
-
-// ===============================
-// LOGIN
-// ===============================
-
-const TOKEN = process.env.DISCORD_TOKEN;
-
-client.login(TOKEN);
+# Bot starten
+bot.run(TOKEN)
+```
