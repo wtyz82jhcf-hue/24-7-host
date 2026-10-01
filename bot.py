@@ -146,7 +146,6 @@ QUIZZES = [
     (["🦅", "☁️"], "Adler"),
     (["🐞", "🌿"], "Marienkäfer"),
     (["🌻", "🌞"], "Sonnenblume"),
-    (["🌹", "❤️"], "Rose"),
     (["🍎", "🍏"], "Apfel"),
     (["🍌", "🍎"], "Obst"),
     (["🍓", "🍒"], "Beeren"),
@@ -158,19 +157,12 @@ QUIZZES = [
     (["🎬", "🎟️"], "Film"),
     (["🎨", "🖼️"], "Kunst"),
     (["📸", "📷"], "Fotografie"),
-    (["🎹", "🎼"], "Klaviermusik"),
     (["🎸", "🥁"], "Band"),
-    (["🎤", "🎙️"], "Sänger"),
-    (["⚽", "🥅"], "Fußball"),
-    (["🏀", "⛹️"], "Basketball"),
     (["🏐", "🏆"], "Volleyball"),
     (["🎾", "🏟️"], "Tennis"),
-    (["🏊", "🏅"], "Schwimmen"),
-    (["🚴", "🏆"], "Radrennen"),
     (["🏎️", "🏁"], "Rennsport"),
     (["🥊", "🏆"], "Boxen"),
 ]
-
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -180,7 +172,7 @@ bot = discord.Client(intents=intents)
 current_quiz = None
 quiz_message = None
 
-# Für jeden Nutzer wird die letzte Richtig-/Falsch-Nachricht gespeichert.
+# Letzte Nachricht je Nutzer:
 last_correct_messages = {}
 last_wrong_messages = {}
 
@@ -205,6 +197,20 @@ def normalize(text):
     return text
 
 
+async def safe_delete(message):
+    if message is None:
+        return
+
+    try:
+        await message.delete()
+    except discord.NotFound:
+        pass
+    except discord.Forbidden:
+        print("❌ Bot darf diese Nachricht nicht löschen.")
+    except discord.HTTPException:
+        pass
+
+
 def create_quiz_embed(emojis):
     embed = discord.Embed(
         title="🎯 Emoji-Quiz",
@@ -217,18 +223,7 @@ def create_quiz_embed(emojis):
     )
 
     embed.set_footer(text="Viel Glück! 🍀")
-
     return embed
-
-
-async def delete_message_safe(message):
-    if message is None:
-        return
-
-    try:
-        await message.delete()
-    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-        pass
 
 
 async def send_new_quiz():
@@ -248,6 +243,8 @@ async def send_new_quiz():
 
     quiz_message = await channel.send(embed=embed)
 
+    print("✅ Neues Quiz gesendet.")
+
 
 @bot.event
 async def on_ready():
@@ -261,64 +258,72 @@ async def on_ready():
 async def on_message(message):
     global current_quiz, quiz_message
 
+    # Bot ignoriert eigene Nachrichten
     if message.author == bot.user:
         return
 
+    # Nur im Quiz-Kanal
     if message.channel.id != CHANNEL_ID:
         return
 
+    # Kein Quiz vorhanden
     if current_quiz is None:
         return
 
     answer = normalize(message.content)
     correct_answer = normalize(current_quiz[1])
-
     user_id = message.author.id
+    mention = message.author.mention
 
-    # =========================
-    # RICHTIGE ANTWORT
-    # =========================
-
+    # =====================================================
+    # RICHTIG
+    # =====================================================
     if answer == correct_answer:
 
-        # Die vorherige Richtig-Nachricht dieses Nutzers löschen
-        if user_id in last_correct_messages:
-            await delete_message_safe(last_correct_messages[user_id])
+        # Alte Richtig-Nachricht dieses Users löschen
+        old_correct = last_correct_messages.get(user_id)
 
-        correct_message = await message.channel.send(
-            f"✅ Richtig {message.author.mention}!"
+        if old_correct is not None:
+            await safe_delete(old_correct)
+
+        # Neue Richtig-Nachricht
+        new_correct = await message.channel.send(
+            f"✅ {mention} Richtig!"
         )
 
-        # Neue Richtig-Nachricht speichern
-        last_correct_messages[user_id] = correct_message
+        # Speichern
+        last_correct_messages[user_id] = new_correct
 
         # Altes Quiz löschen
-        await delete_message_safe(quiz_message)
-
-        # Neues Quiz
-        current_quiz = None
+        old_quiz = quiz_message
         quiz_message = None
+        current_quiz = None
 
+        await safe_delete(old_quiz)
+
+        # Neues Quiz senden
         async with quiz_lock:
             if current_quiz is None:
                 await send_new_quiz()
 
-    # =========================
-    # FALSCHE ANTWORT
-    # =========================
-
+    # =====================================================
+    # FALSCH
+    # =====================================================
     else:
 
-        # Die vorherige Falsch-Nachricht dieses Nutzers löschen
-        if user_id in last_wrong_messages:
-            await delete_message_safe(last_wrong_messages[user_id])
+        # Alte Falsch-Nachricht dieses Users löschen
+        old_wrong = last_wrong_messages.get(user_id)
 
-        wrong_message = await message.channel.send(
-            "❌ Leider falsch! Nächster Versuch, vielleicht wird's dann!"
+        if old_wrong is not None:
+            await safe_delete(old_wrong)
+
+        # Neue Falsch-Nachricht
+        new_wrong = await message.channel.send(
+            f"❌ {mention} Leider falsch! Nächster Versuch, vielleicht wird's dann!"
         )
 
-        # Neue Falsch-Nachricht speichern
-        last_wrong_messages[user_id] = wrong_message
+        # Speichern
+        last_wrong_messages[user_id] = new_wrong
 
 
 TOKEN = os.environ["DISCORD_TOKEN"]
