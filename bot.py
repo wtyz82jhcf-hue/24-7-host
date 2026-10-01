@@ -1,12 +1,10 @@
-```python
+python
 import os
 import random
 import discord
 
-# Discord-Kanal
 CHANNEL_ID = 1533409789256925185
 
-# Emoji-Rätsel
 QUIZZES = [
     (["🍕", "👨‍🍳", "🔥", "🍅", "🧀", "🍴"], "Pizza"),
     (["🌧️", "☀️", "🌈", "☁️", "💧", "🌤️"], "Regenbogen"),
@@ -40,14 +38,11 @@ QUIZZES = [
     (["🌲", "🏕️", "🔥", "🌙", "🥾", "🏞️"], "Camping"),
 ]
 
-# Discord-Berechtigungen
 intents = discord.Intents.default()
 intents.message_content = True
 
-# Bot erstellen
 bot = discord.Client(intents=intents)
 
-# Aktuelles Rätsel
 current_quiz = None
 
 
@@ -88,34 +83,26 @@ async def on_ready():
 async def on_message(message):
     global current_quiz
 
-    # Nachrichten vom Bot ignorieren
     if message.author == bot.user:
         return
 
-    # Nur den gewünschten Kanal verwenden
     if message.channel.id != CHANNEL_ID:
         return
 
-    # Falls noch kein Rätsel vorhanden ist
     if current_quiz is None:
         return
 
     answer = normalize(message.content)
     correct_answer = normalize(current_quiz[1])
 
-    # Richtige Antwort
     if answer == correct_answer:
         await message.channel.send(
             f"✅ Richtig, {message.author.mention}!"
         )
 
-        # Neues Rätsel senden
         await send_new_quiz()
 
 
-# Token aus GitHub Secret holen
 TOKEN = os.environ["DISCORD_TOKEN"]
 
-# Bot starten
 bot.run(TOKEN)
-```
