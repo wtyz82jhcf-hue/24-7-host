@@ -1,4 +1,3 @@
-```python
 import os
 import json
 import random
@@ -1569,4 +1568,3 @@ if not TOKEN:
 print("🚀 Starte RLP Bot...")
 
 bot.run(TOKEN)
-```
