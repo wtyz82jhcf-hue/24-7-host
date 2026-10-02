@@ -1,4 +1,4 @@
-
+import os
 import random
 import re
 import asyncio
@@ -9,13 +9,13 @@ import discord
 # KANÄLE
 # ============================================================
 
-# Emoji-Quiz
+# Emoji-Quiz-Kanal
 QUIZ_CHANNEL_ID = 1533409789256925185
 
-# Developer-Bewerbung
+# Developer-Bewerbungskanal
 APPLICATION_CHANNEL_ID = 1541391365219295343
 
-# Hier kommen die fertigen Bewerbungen rein
+# Kanal für fertige Developer-Bewerbungen
 REVIEW_CHANNEL_ID = 1548404201493762181
 
 
@@ -25,72 +25,130 @@ REVIEW_CHANNEL_ID = 1548404201493762181
 
 QUIZZES = [
     (["🍕", "🧀"], "Pizza"),
-    (["🍔", "🍟"], "Fast Food"),
+    (["🌧️", "🌈"], "Regenbogen"),
+    (["🐶", "🦴"], "Hund"),
+    (["🐱", "🐭"], "Katze"),
+    (["🐰", "🥕"], "Hase"),
+    (["🐵", "🍌"], "Affe"),
+    (["🐼", "🎋"], "Panda"),
+    (["🦁", "🌿"], "Löwe"),
+    (["🐯", "🌴"], "Tiger"),
+    (["🐘", "🌳"], "Elefant"),
+    (["🦒", "🌳"], "Giraffe"),
+    (["🐴", "🏇"], "Pferd"),
+    (["🐮", "🥛"], "Kuh"),
+    (["🐷", "🐖"], "Schwein"),
+    (["🐔", "🥚"], "Huhn"),
+    (["🐸", "💧"], "Frosch"),
+    (["🐢", "🏁"], "Schildkröte"),
+    (["🐍", "🌿"], "Schlange"),
+    (["🦋", "🌸"], "Schmetterling"),
+    (["🐝", "🍯"], "Biene"),
+    (["🐞", "🌿"], "Marienkäfer"),
+    (["🦊", "🌲"], "Fuchs"),
+    (["🐻", "🍯"], "Bär"),
+    (["🐺", "🌙"], "Wolf"),
+    (["🦉", "🌙"], "Eule"),
+    (["🦅", "☁️"], "Adler"),
+    (["🐧", "❄️"], "Pinguin"),
+    (["🐬", "🌊"], "Delfin"),
+    (["🦈", "🌊"], "Hai"),
+    (["🐙", "🌊"], "Oktopus"),
+    (["🦀", "🏖️"], "Krabbe"),
+    (["🐠", "🌊"], "Fisch"),
     (["🍎", "🍏"], "Apfel"),
-    (["🍌", "🍓"], "Obst"),
+    (["🍌", "🍎"], "Banane"),
     (["🍓", "🍒"], "Beeren"),
     (["🍉", "☀️"], "Wassermelone"),
     (["🍋", "🥤"], "Limonade"),
-    (["🍫", "🥛"], "Schokolade"),
+    (["🍊", "🍹"], "Orange"),
+    (["🍍", "🌴"], "Ananas"),
+    (["🥥", "🏝️"], "Kokosnuss"),
+    (["🥕", "🐰"], "Karotte"),
+    (["🌽", "🌾"], "Mais"),
+    (["🍅", "🥗"], "Salat"),
+    (["🍔", "🍟"], "Fast Food"),
+    (["🌭", "🥤"], "Hotdog"),
+    (["🍿", "🎬"], "Kino"),
+    (["🍦", "☀️"], "Eis"),
     (["🍩", "☕"], "Donut"),
-    (["🍰", "🧁"], "Backen"),
+    (["🍫", "🥛"], "Schokolade"),
+    (["🍰", "🧁"], "Kuchen"),
+    (["🍪", "🥛"], "Kekse"),
     (["🍝", "🍅"], "Nudeln"),
     (["🍣", "🥢"], "Sushi"),
     (["🌮", "🌶️"], "Taco"),
-    (["🍦", "☀️"], "Eis"),
+    (["🍳", "🥓"], "Frühstück"),
     (["🥪", "🥤"], "Mittagessen"),
     (["☕", "🥐"], "Frühstück"),
-    (["🎂", "🎈"], "Geburtstag"),
-    (["🎁", "🎀"], "Geschenk"),
+    (["🎂", "🎁"], "Geburtstag"),
     (["🎈", "🎉"], "Party"),
-    (["🍿", "📺"], "Fernsehen"),
-    (["📖", "🔦"], "Lesen"),
-    (["✏️", "📓"], "Schreiben"),
-    (["🎨", "🖌️"], "Malen"),
-    (["📷", "🤳"], "Foto"),
-    (["📱", "💬"], "Chat"),
-    (["📞", "📱"], "Anruf"),
-    (["💻", "⌨️"], "Computer"),
-    (["📧", "💻"], "E-Mail"),
-    (["🎮", "🕹️"], "Gaming"),
-    (["🎧", "🎵"], "Musik"),
-    (["🎤", "🎶"], "Sänger"),
-    (["🎹", "🎼"], "Klavier"),
-    (["🥁", "🎵"], "Schlagzeug"),
-    (["🎸", "🥁"], "Band"),
-    (["🎬", "🎟️"], "Film"),
-    (["🎨", "🖼️"], "Kunst"),
+    (["🎄", "🎁"], "Weihnachten"),
+    (["🎃", "👻"], "Halloween"),
+    (["❤️", "🌹"], "Liebe"),
+    (["💐", "🌷"], "Blumen"),
+    (["😊", "❤️"], "Glück"),
+    (["😂", "🤣"], "Lachen"),
+    (["😭", "💧"], "Weinen"),
+    (["😡", "🔥"], "Wut"),
+    (["😎", "🕶️"], "Cool"),
+    (["😴", "🛏️"], "Schlafen"),
+    (["⏰", "😴"], "Wecker"),
+    (["🚿", "🧼"], "Duschen"),
+    (["🪥", "😁"], "Zähneputzen"),
+    (["👟", "🏃"], "Laufen"),
+    (["🏊", "🌊"], "Schwimmen"),
+    (["🚴", "🚲"], "Radfahren"),
+    (["🏋️", "💪"], "Fitness"),
     (["⚽", "🥅"], "Fußball"),
-    (["🏀", "⛹️"], "Basketball"),
+    (["🏀", "🏆"], "Basketball"),
     (["🏐", "🏆"], "Volleyball"),
     (["🎾", "🏟️"], "Tennis"),
     (["🥊", "🏆"], "Boxen"),
-    (["🏎️", "🏁"], "Rennsport"),
-    (["🚴", "🏆"], "Radrennen"),
-    (["🏊", "🌊"], "Schwimmen"),
-    (["👟", "🏃"], "Laufen"),
-    (["🏋️", "💪"], "Fitness"),
+    (["🏎️", "🏁"], "Rennen"),
     (["🎯", "🏆"], "Gewinnen"),
     (["🥇", "🏆"], "Sieger"),
+    (["🎸", "🎤"], "Musik"),
+    (["🥁", "🎵"], "Schlagzeug"),
+    (["🎹", "🎼"], "Klavier"),
+    (["🎨", "🖌️"], "Malen"),
+    (["📖", "🔦"], "Lesen"),
+    (["✏️", "📓"], "Schreiben"),
+    (["📷", "🤳"], "Foto"),
+    (["🎧", "🎵"], "Musik"),
+    (["📺", "🍿"], "Fernsehen"),
+    (["🎮", "🕹️"], "Gaming"),
+    (["💻", "⌨️"], "Computer"),
+    (["📱", "💬"], "Chat"),
+    (["📧", "💻"], "E-Mail"),
+    (["📞", "📱"], "Anruf"),
+    (["🔑", "🚪"], "Schlüssel"),
+    (["🔒", "🔑"], "Schloss"),
+    (["💰", "🏦"], "Geld"),
+    (["💎", "💰"], "Reichtum"),
+    (["🎁", "🎀"], "Geschenk"),
     (["🚗", "⛽"], "Auto"),
-    (["🚲", "🛣️"], "Fahrrad"),
-    (["🏍️", "🛣️"], "Motorrad"),
     (["🚕", "🏙️"], "Taxi"),
     (["🚌", "🚏"], "Bus"),
+    (["🚲", "🛣️"], "Fahrrad"),
+    (["🏍️", "🛣️"], "Motorrad"),
     (["🚓", "👮"], "Polizei"),
     (["🚑", "🏥"], "Krankenwagen"),
     (["🚒", "🔥"], "Feuerwehr"),
     (["🚁", "🚨"], "Hubschrauber"),
     (["🚢", "⚓"], "Schiff"),
     (["🚆", "🚉"], "Zug"),
-    (["🛫", "🛬"], "Flugzeug"),
-    (["🚂", "🎫"], "Zugfahrt"),
-    (["✈️", "🧳"], "Reise"),
-    (["🗺️", "🧳"], "Urlaub"),
-    (["🏨", "🛏️"], "Hotel"),
+    (["✈️", "🧳"], "Flugzeug"),
+    (["🚀", "🌕"], "Weltraum"),
+    (["🏴‍☠️", "🚢"], "Piraten"),
+    (["👑", "🏰"], "König"),
+    (["🏰", "⚔️"], "Burg"),
+    (["🗺️", "🧳"], "Reise"),
     (["🌍", "✈️"], "Weltreise"),
+    (["🏨", "🛏️"], "Hotel"),
     (["🏖️", "☀️"], "Strand"),
-    (["🌊", "🏝️"], "Insel"),
+    (["🌊", "🐚"], "Meer"),
+    (["🏝️", "🌴"], "Insel"),
     (["🏕️", "🔥"], "Camping"),
     (["🏔️", "❄️"], "Berg"),
     (["🏜️", "🐪"], "Wüste"),
@@ -100,266 +158,48 @@ QUIZZES = [
     (["❄️", "⛄"], "Winter"),
     (["🍂", "🌳"], "Herbst"),
     (["🌷", "🌸"], "Frühling"),
-    (["🌧️", "☔"], "Regen"),
-    (["☁️", "💧"], "Wolke"),
-    (["🌈", "☀️"], "Regenbogen"),
     (["🌙", "⭐"], "Mond"),
-    (["🌙", "😴"], "Nacht"),
+    (["☁️", "💧"], "Regen"),
     (["🌞", "🔥"], "Hitze"),
-    (["🌊", "🐚"], "Meer"),
-    (["⭐", "🌌"], "Sterne"),
-    (["🐶", "🦴"], "Hund"),
-    (["🐱", "🐭"], "Katze"),
-    (["🐭", "🧀"], "Maus"),
-    (["🐰", "🥕"], "Hase"),
-    (["🐮", "🥛"], "Kuh"),
-    (["🐷", "🌾"], "Schwein"),
-    (["🐔", "🥚"], "Huhn"),
-    (["🐴", "🏇"], "Pferd"),
-    (["🐵", "🍌"], "Affe"),
-    (["🦊", "🌲"], "Fuchs"),
-    (["🐻", "🍯"], "Bär"),
-    (["🐼", "🎋"], "Panda"),
-    (["🦒", "🌳"], "Giraffe"),
-    (["🐘", "🌍"], "Elefant"),
-    (["🦁", "👑"], "Löwe"),
-    (["🐯", "🌴"], "Tiger"),
-    (["🐺", "🌙"], "Wolf"),
-    (["🦉", "🌙"], "Eule"),
-    (["🦅", "☁️"], "Adler"),
-    (["🐬", "🌊"], "Delfin"),
-    (["🦈", "🌊"], "Hai"),
-    (["🐙", "🌊"], "Oktopus"),
-    (["🦀", "🏖️"], "Krabbe"),
-    (["🐸", "💧"], "Frosch"),
-    (["🐢", "🏁"], "Schildkröte"),
-    (["🐍", "🌿"], "Schlange"),
-    (["🐊", "🌊"], "Krokodil"),
-    (["🐧", "❄️"], "Pinguin"),
-    (["🦄", "✨"], "Einhorn"),
-    (["🐲", "🔥"], "Drache"),
-    (["🦋", "🌸"], "Schmetterling"),
-    (["🐝", "🌼"], "Biene"),
-    (["🐞", "🌿"], "Marienkäfer"),
+    (["🌳", "🍎"], "Apfelbaum"),
     (["🌻", "🌞"], "Sonnenblume"),
     (["🌹", "❤️"], "Rose"),
-    (["🌲", "🎄"], "Tannenbaum"),
-    (["🎄", "🎁"], "Weihnachten"),
-    (["🎃", "👻"], "Halloween"),
-    (["🏴‍☠️", "🚢"], "Piraten"),
-    (["👑", "🏰"], "König"),
-    (["❤️", "🌹"], "Liebe"),
-    (["❤️", "😊"], "Glück"),
-    (["😂", "🤣"], "Lachen"),
-    (["😭", "💧"], "Weinen"),
-    (["😡", "🔥"], "Wut"),
-    (["😎", "🕶️"], "Cool"),
-    (["😴", "🛏️"], "Schlafen"),
-    (["⏰", "😴"], "Wecker"),
-    (["🚿", "🧼"], "Duschen"),
-    (["🪥", "😁"], "Zähneputzen"),
-    (["🧠", "💡"], "Idee"),
     (["🎓", "📚"], "Abschluss"),
     (["🔬", "🧪"], "Wissenschaft"),
     (["🧑‍🍳", "🍳"], "Kochen"),
-    (["💰", "🏦"], "Geld"),
-    (["💎", "💰"], "Reichtum"),
-    (["🔑", "🚪"], "Schlüssel"),
-    (["🔒", "🔑"], "Schloss"),
-    (["🔍", "🕵️"], "Detektiv"),
-    (["📦", "📬"], "Paket"),
-    (["📅", "🗓️"], "Kalender"),
-    (["⏱️", "⌛"], "Zeit"),
-    (["🔔", "📣"], "Alarm"),
-    (["🔦", "🌙"], "Taschenlampe"),
-    (["☂️", "🌧️"], "Regenschirm"),
-    (["🧤", "❄️"], "Handschuhe"),
-    (["🧣", "❄️"], "Schal"),
-    (["👟", "⚽"], "Fußballschuhe"),
-    (["👕", "👖"], "Kleidung"),
-    (["🧢", "🧒"], "Mütze"),
-    (["🕶️", "☀️"], "Sonnenbrille"),
-    (["👑", "💎"], "Krone"),
-    (["💍", "❤️"], "Ehering"),
-    (["🎒", "📚"], "Schultasche"),
-    (["🏫", "👨‍🏫"], "Schule"),
-    (["🏠", "🔑"], "Haus"),
-    (["🛏️", "🏠"], "Schlafzimmer"),
-    (["🛋️", "📺"], "Wohnzimmer"),
-    (["🍳", "🥚"], "Ei"),
-    (["🍞", "🧈"], "Brot"),
-    (["🧀", "🐭"], "Käse"),
-    (["🍯", "🐝"], "Honig"),
-    (["🥕", "🐰"], "Karotte"),
-    (["🌽", "🐔"], "Mais"),
-    (["🍉", "🔪"], "Obstschneiden"),
-    (["🥤", "🧊"], "Getränk"),
-    (["🍵", "🌿"], "Tee"),
-    (["🥛", "🥣"], "Milch"),
-    (["🧊", "🥤"], "Eiswürfel"),
-    (["🍪", "🥛"], "Kekse"),
-    (["🍬", "🍭"], "Süßigkeiten"),
-    (["🍭", "🎪"], "Jahrmarkt"),
-    (["🎡", "🎢"], "Freizeitpark"),
-    (["🎠", "🎪"], "Karussell"),
-    (["🎳", "🎯"], "Bowling"),
-    (["🏓", "🏆"], "Tischtennis"),
-    (["🏸", "🏆"], "Badminton"),
-    (["🏹", "🎯"], "Bogenschießen"),
-    (["⛳", "🏌️"], "Golf"),
-    (["🎣", "🐟"], "Angeln"),
-    (["⛸️", "❄️"], "Eislaufen"),
-    (["🎿", "🏔️"], "Skifahren"),
-    (["🏂", "❄️"], "Snowboarden"),
-    (["🛷", "⛄"], "Rodeln"),
-    (["🏄", "🌊"], "Surfen"),
-    (["🤿", "🌊"], "Tauchen"),
-    (["🛶", "🌊"], "Kanufahren"),
-    (["🚤", "🌊"], "Motorboot"),
-    (["⛵", "🌊"], "Segeln"),
-    (["🚦", "🚗"], "Verkehr"),
-    (["⛽", "🚗"], "Tanken"),
-    (["🅿️", "🚗"], "Parkplatz"),
-    (["🚧", "🚗"], "Baustelle"),
-    (["🛣️", "🚗"], "Straße"),
-    (["🌐", "💻"], "Internet"),
-    (["📡", "📶"], "WLAN"),
-    (["🔋", "📱"], "Akku"),
-    (["🔌", "⚡"], "Strom"),
-    (["💡", "🔌"], "Lampe"),
-    (["🖨️", "📄"], "Drucker"),
-    (["⌨️", "🖥️"], "Tastatur"),
-    (["🖱️", "💻"], "Maus"),
-    (["📺", "🎮"], "Konsole"),
-    (["📻", "🎵"], "Radio"),
-    (["🎧", "📱"], "Kopfhörer"),
-    (["📹", "🎥"], "Video"),
-    (["🎞️", "🎬"], "Filmrolle"),
-    (["📡", "📺"], "Fernsehen"),
-    (["📚", "📖"], "Bücher"),
-    (["📝", "✏️"], "Notiz"),
-    (["📌", "📋"], "Plan"),
-    (["📍", "🗺️"], "Standort"),
-    (["✂️", "📄"], "Schere"),
-    (["📎", "📄"], "Büro"),
-    (["🖍️", "🎨"], "Malen"),
-    (["🧩", "🧠"], "Puzzle"),
-    (["🎲", "🎯"], "Spiel"),
-    (["♟️", "♟️"], "Schach"),
-    (["🃏", "🎲"], "Karten"),
-    (["🎁", "🎉"], "Feier"),
-    (["🎂", "🕯️"], "Geburtstag"),
-    (["💌", "❤️"], "Liebesbrief"),
-    (["📮", "✉️"], "Post"),
-    (["✉️", "📬"], "Brief"),
-    (["📦", "🚚"], "Lieferung"),
+    (["🍰", "🧁"], "Backen"),
+    (["🧑‍💻", "💻"], "Developer"),
+    (["💡", "🧠"], "Idee"),
+    (["🎬", "🎟️"], "Film"),
+    (["🎨", "🖼️"], "Kunst"),
+    (["🎤", "🎙️"], "Sänger"),
+    (["🎸", "🥁"], "Band"),
+    (["🎹", "🎼"], "Klaviermusik"),
+    (["📚", "🏫"], "Schule"),
+    (["🎒", "📚"], "Schulranzen"),
+    (["📝", "✏️"], "Hausaufgaben"),
+    (["📅", "⏰"], "Termin"),
     (["🛒", "🛍️"], "Einkaufen"),
-    (["🏪", "🛒"], "Supermarkt"),
-    (["💳", "🏦"], "Bezahlen"),
-    (["💵", "💰"], "Geld"),
-    (["🏧", "💳"], "Geldautomat"),
-    (["🏦", "💰"], "Bank"),
-    (["🏥", "🩺"], "Arzt"),
-    (["💊", "🏥"], "Medizin"),
-    (["🚑", "🩹"], "Erste Hilfe"),
-    (["🦷", "🪥"], "Zahnarzt"),
-    (["👓", "👀"], "Brille"),
-    (["👂", "🎧"], "Ohren"),
-    (["👃", "🌸"], "Nase"),
-    (["👟", "🧦"], "Socken"),
-    (["🧤", "🧣"], "Winterkleidung"),
-    (["🧥", "❄️"], "Winterjacke"),
-    (["👗", "👠"], "Kleid"),
-    (["👔", "👞"], "Anzug"),
-    (["🎩", "🧥"], "Hut"),
-    (["💄", "🪞"], "Make-up"),
-    (["🪞", "👀"], "Spiegel"),
-    (["🧴", "🧼"], "Seife"),
-    (["🧹", "🏠"], "Putzen"),
-    (["🧺", "👕"], "Wäsche"),
-    (["🧽", "🧼"], "Waschen"),
-    (["🛁", "🫧"], "Badewanne"),
-    (["🚽", "🧻"], "Toilette"),
-    (["🧻", "🧼"], "Papier"),
-    (["🪣", "💧"], "Eimer"),
-    (["🔨", "🪚"], "Handwerk"),
-    (["🪛", "🔩"], "Werkzeug"),
-    (["🔧", "🚗"], "Reparatur"),
-    (["🧰", "🔧"], "Werkzeugkasten"),
-    (["🪜", "🏠"], "Leiter"),
-    (["🧯", "🔥"], "Feuerlöscher"),
-    (["🏠", "🌳"], "Garten"),
-    (["🌱", "🌷"], "Pflanzen"),
-    (["🌵", "🏜️"], "Kaktus"),
-    (["🌳", "🍎"], "Apfelbaum"),
-    (["🍁", "🍂"], "Blätter"),
-    (["🌴", "🏖️"], "Palme"),
-    (["🌾", "🌻"], "Feld"),
-    (["🌧️", "🌱"], "Wachsen"),
-    (["🌨️", "❄️"], "Schnee"),
-    (["⛈️", "⚡"], "Gewitter"),
-    (["🌪️", "☁️"], "Sturm"),
-    (["☀️", "🌤️"], "Sonne"),
-    (["🌅", "🌄"], "Sonnenaufgang"),
-    (["🌇", "🌆"], "Sonnenuntergang"),
-    (["🌌", "🔭"], "Sternenhimmel"),
-    (["🔭", "🌙"], "Astronomie"),
-    (["🏰", "🛡️"], "Burg"),
-    (["🏯", "⛩️"], "Schloss"),
-    (["🗼", "🇫🇷"], "Paris"),
-    (["🗽", "🇺🇸"], "New York"),
-    (["🕌", "🕌"], "Moschee"),
-    (["⛪", "🔔"], "Kirche"),
-    (["🕍", "🕯️"], "Synagoge"),
-    (["🏛️", "📚"], "Museum"),
-    (["🖼️", "🏛️"], "Galerie"),
-    (["🎭", "🎟️"], "Theater"),
-    (["🎪", "🤡"], "Zirkus"),
-    (["🎁", "📦"], "Paket"),
-    (["🏆", "🥇"], "Pokal"),
-    (["🎖️", "🏅"], "Medaille"),
-    (["🏅", "🏃"], "Sport"),
-    (["🧑‍🎓", "🎓"], "Student"),
-    (["🧑‍🏫", "📚"], "Lehrer"),
-    (["👨‍🚒", "🚒"], "Feuerwehrmann"),
-    (["👮", "🚓"], "Polizist"),
-    (["🧑‍🍳", "🍴"], "Koch"),
-    (["🧑‍🎤", "🎤"], "Sänger"),
-    (["👨‍⚕️", "🏥"], "Arzt"),
-    (["👨‍🔧", "🔧"], "Mechaniker"),
-    (["👨‍🌾", "🌾"], "Bauer"),
-    (["👩‍💻", "💻"], "Developer"),
-    (["🧑‍🎨", "🎨"], "Künstler"),
-    (["🕵️", "🔍"], "Detektiv"),
-    (["👷", "🚧"], "Bauarbeiter"),
-    (["🧑‍🚀", "🚀"], "Astronaut"),
-    (["🧜", "🌊"], "Meerjungfrau"),
-    (["🧚", "✨"], "Fee"),
-    (["🧙", "🔮"], "Zauberer"),
-    (["🧛", "🩸"], "Vampir"),
-    (["🧟", "🧟"], "Zombie"),
-    (["👻", "🏚️"], "Geist"),
-    (["🤖", "⚙️"], "Roboter"),
-    (["👽", "🛸"], "Alien"),
-    (["🦸", "🦹"], "Superheld"),
-    (["🤠", "🐎"], "Cowboy"),
-    (["🥳", "🎉"], "Feier"),
-    (["😇", "👼"], "Engel"),
-    (["😈", "🔥"], "Teufel"),
-    (["🤡", "🎪"], "Clown"),
-    (["🧑‍🚀", "🌕"], "Mondmission"),
-    (["🛰️", "🌍"], "Satellit"),
-    (["🚀", "🪐"], "Rakete"),
-    (["🌕", "🌊"], "Mond"),
-    (["☀️", "🌍"], "Sonne"),
-    (["🌎", "🌍"], "Erde"),
-    (["🪐", "⭐"], "Planet"),
-    (["⭐", "🌠"], "Sternschnuppe"),
+    (["🏠", "🔑"], "Zuhause"),
+    (["🛋️", "📺"], "Wohnzimmer"),
+    (["🛏️", "🌙"], "Schlafzimmer"),
+    (["🚪", "🔔"], "Türklingel"),
+    (["📦", "🚚"], "Paket"),
+    (["📬", "✉️"], "Brief"),
+    (["✉️", "📮"], "Post"),
+    (["🔔", "📱"], "Benachrichtigung"),
+    (["🎟️", "🎬"], "Kinokarte"),
+    (["🎁", "🎉"], "Feier"),
+    (["🎊", "🎉"], "Feier"),
+    (["🕯️", "🎂"], "Geburtstag"),
+    (["💍", "❤️"], "Hochzeit"),
+    (["💌", "❤️"], "Liebesbrief"),
+    (["🌹", "💌"], "Valentinstag"),
 ]
 
 
 # ============================================================
-# DEVELOPER-BEWERBUNG
+# DEVELOPER-FRAGEN
 # ============================================================
 
 DEVELOPER_QUESTIONS = [
@@ -376,7 +216,7 @@ DEVELOPER_QUESTIONS = [
 
 
 # ============================================================
-# DISCORD
+# DISCORD INTENTS
 # ============================================================
 
 intents = discord.Intents.default()
@@ -384,22 +224,29 @@ intents.message_content = True
 
 
 # ============================================================
-# GLOBALE VARIABLEN
+# STATUS
 # ============================================================
 
 current_quiz = None
 current_quiz_message = None
-quiz_order = []
-quiz_order_position = 0
 
-# Pro User wird nur die letzte Richtig-/Falsch-Nachricht gespeichert.
+# Letzte Ergebnis-Nachricht pro User
 last_result_messages = {}
 
-# Bewerbungen, die gerade laufen.
+# Aktive Bewerbungen
 active_applications = set()
 
-# Verhindert gleichzeitige Quiz-Wechsel.
+# Verhindert gleichzeitige Quiz-Wechsel
 quiz_lock = asyncio.Lock()
+
+# Shuffle-Bag
+quiz_bag = []
+
+# Letztes Emoji-Set
+last_quiz_emojis = set()
+
+# Start einmalig ausführen
+startup_finished = False
 
 
 # ============================================================
@@ -419,7 +266,11 @@ def normalize(text):
     for old, new in replacements.items():
         text = text.replace(old, new)
 
-    text = re.sub(r"[^a-z0-9]+", "", text)
+    text = re.sub(
+        r"[^a-z0-9]+",
+        "",
+        text
+    )
 
     return text
 
@@ -435,28 +286,34 @@ async def safe_delete(message):
         pass
 
     except discord.Forbidden:
-        print("❌ Keine Berechtigung zum Löschen!")
+        print(
+            "❌ Keine Berechtigung zum Löschen der Nachricht."
+        )
 
     except discord.HTTPException as error:
-        print(f"❌ Fehler beim Löschen: {error}")
+        print(
+            f"❌ Fehler beim Löschen: {error}"
+        )
 
 
 async def delete_previous_result(user, channel):
     """
-    Löscht die letzte Ergebnis-Nachricht dieses Users.
-
-    Wenn der Bot zwischenzeitlich neu gestartet wurde,
-    wird zusätzlich im Kanal nach der letzten passenden
-    Nachricht gesucht.
+    Jeder User besitzt nur eine Ergebnis-Nachricht.
+    Beim nächsten Ergebnis wird die alte Nachricht gelöscht.
     """
 
     user_id = user.id
 
-    # Gespeicherte Nachricht verwenden.
-    old_message = last_result_messages.get(user_id)
+    # Zuerst die gespeicherte Nachricht verwenden.
+    old_message = last_result_messages.get(
+        user_id
+    )
 
     if old_message is not None:
-        await safe_delete(old_message)
+
+        await safe_delete(
+            old_message
+        )
 
         last_result_messages.pop(
             user_id,
@@ -465,11 +322,14 @@ async def delete_previous_result(user, channel):
 
         return
 
-    # Fallback nach Neustart.
+    # Fallback nach Neustart:
+    # letzte passende Bot-Nachricht suchen.
     try:
+
         async for message in channel.history(
             limit=100
         ):
+
             if message.author != bot.user:
                 continue
 
@@ -480,20 +340,76 @@ async def delete_previous_result(user, channel):
                 message.content.startswith("✅")
                 or message.content.startswith("❌")
             ):
-                await safe_delete(message)
+
+                await safe_delete(
+                    message
+                )
+
                 return
 
     except discord.Forbidden:
+
         print(
-            "❌ Keine Berechtigung, den Nachrichtenverlauf zu lesen."
+            "❌ Keine Berechtigung zum Lesen des Nachrichtenverlaufs."
         )
 
 
 # ============================================================
-# QUIZ
+# QUIZ BAG
+# ============================================================
+
+def refill_quiz_bag():
+    global quiz_bag
+
+    quiz_bag = list(
+        range(len(QUIZZES))
+    )
+
+    random.shuffle(
+        quiz_bag
+    )
+
+
+def get_next_quiz():
+    global quiz_bag
+    global last_quiz_emojis
+
+    if not quiz_bag:
+        refill_quiz_bag()
+
+    # Versuchen, ein Quiz ohne gemeinsame Emojis
+    # mit dem vorherigen Quiz zu finden.
+    for position, index in enumerate(quiz_bag):
+
+        emojis = set(
+            QUIZZES[index][0]
+        )
+
+        if not (
+            emojis
+            & last_quiz_emojis
+        ):
+            quiz_bag.pop(position)
+            last_quiz_emojis = emojis
+            return QUIZZES[index]
+
+    # Falls kein passendes gefunden wurde,
+    # trotzdem das nächste aus dem Bag nehmen.
+    index = quiz_bag.pop(0)
+
+    last_quiz_emojis = set(
+        QUIZZES[index][0]
+    )
+
+    return QUIZZES[index]
+
+
+# ============================================================
+# QUIZ EMBED
 # ============================================================
 
 def create_quiz_embed(emojis):
+
     embed = discord.Embed(
         title="🎯 Emoji-Quiz",
         description=(
@@ -511,34 +427,28 @@ def create_quiz_embed(emojis):
     return embed
 
 
+# ============================================================
+# NEUES QUIZ
+# ============================================================
+
 async def send_new_quiz():
+
     global current_quiz
     global current_quiz_message
-    global quiz_order
-    global quiz_order_position
 
     channel = bot.get_channel(
         QUIZ_CHANNEL_ID
     )
 
     if channel is None:
+
         print(
             "❌ Emoji-Quiz-Kanal wurde nicht gefunden."
         )
+
         return
 
-    # Alle Quizze werden zuerst gemischt.
-    # Dadurch erscheint kein Rätsel erneut, bevor
-    # einmal alle anderen Quizze benutzt wurden.
-    if not quiz_order or quiz_order_position >= len(quiz_order):
-        quiz_order = list(range(len(QUIZZES)))
-        random.shuffle(quiz_order)
-        quiz_order_position = 0
-
-    quiz_index = quiz_order[quiz_order_position]
-    quiz_order_position += 1
-
-    current_quiz = QUIZZES[quiz_index]
+    current_quiz = get_next_quiz()
 
     embed = create_quiz_embed(
         current_quiz[0]
@@ -554,7 +464,40 @@ async def send_new_quiz():
 
 
 # ============================================================
-# DEVELOPER BUTTON
+# ALTE QUIZ-EMBEDS LÖSCHEN
+# ============================================================
+
+async def cleanup_old_quizzes(channel):
+
+    try:
+
+        async for message in channel.history(
+            limit=100
+        ):
+
+            if message.author != bot.user:
+                continue
+
+            if not message.embeds:
+                continue
+
+            embed = message.embeds[0]
+
+            if embed.title == "🎯 Emoji-Quiz":
+
+                await safe_delete(
+                    message
+                )
+
+    except discord.Forbidden:
+
+        print(
+            "❌ Keine Berechtigung, alte Quizze zu löschen."
+        )
+
+
+# ============================================================
+# DEVELOPER-BUTTON
 # ============================================================
 
 class DeveloperApplicationView(
@@ -577,13 +520,16 @@ class DeveloperApplicationView(
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+
         user = interaction.user
 
         if user.id in active_applications:
+
             await interaction.response.send_message(
                 "⏳ Deine Developer-Bewerbung läuft bereits.",
                 ephemeral=True
             )
+
             return
 
         active_applications.add(
@@ -594,23 +540,26 @@ class DeveloperApplicationView(
 
             # DM öffnen
             try:
+
                 await user.send(
                     "👨‍💻 **Developer-Bewerbung**\n\n"
                     "Vielen Dank für dein Interesse an unserem Developer-Team!\n\n"
                     "Die Bewerbung besteht aus **9 Fragen**.\n"
-                    "Die Fragen werden **einzeln** gestellt.\n\n"
+                    "Die Fragen kommen **einzeln**.\n\n"
                     "Du beantwortest Frage 1 → "
                     "danach kommt Frage 2 → "
                     "bis Frage 9.\n\n"
-                    "Schreibe **abbrechen**, wenn du die Bewerbung beenden möchtest."
+                    "Schreibe **abbrechen**, wenn du die Bewerbung "
+                    "beenden möchtest."
                 )
 
             except discord.Forbidden:
 
                 await interaction.response.send_message(
                     "❌ Ich kann dir keine DM schicken.\n\n"
-                    "Bitte aktiviere deine Direktnachrichten für diesen Server "
-                    "und klicke danach erneut auf **Bewerben**.",
+                    "Bitte aktiviere deine Direktnachrichten "
+                    "für diesen Server und klicke danach erneut "
+                    "auf **Bewerben**.",
                     ephemeral=True
                 )
 
@@ -626,13 +575,14 @@ class DeveloperApplicationView(
             )
 
         finally:
+
             active_applications.discard(
                 user.id
             )
 
 
 # ============================================================
-# BEWERBUNG DURCHFÜHREN
+# DEVELOPER-BEWERBUNG
 # ============================================================
 
 async def start_developer_application(user):
@@ -640,6 +590,7 @@ async def start_developer_application(user):
     answers = []
 
     def check(message):
+
         return (
             message.author.id == user.id
             and isinstance(
@@ -653,13 +604,13 @@ async def start_developer_application(user):
         start=1
     ):
 
-        # Nur die aktuelle Frage senden.
+        # Genau eine Frage senden.
         await user.send(
             f"**Frage {number}/9**\n\n"
             f"{question}"
         )
 
-        # Auf die Antwort warten.
+        # Warten, bis der User antwortet.
         try:
 
             answer_message = await bot.wait_for(
@@ -679,7 +630,7 @@ async def start_developer_application(user):
 
         answer = answer_message.content.strip()
 
-        # Abbrechen.
+        # Bewerbung abbrechen.
         if normalize(answer) == "abbrechen":
 
             await user.send(
@@ -693,8 +644,7 @@ async def start_developer_application(user):
             answer
         )
 
-        # Danach geht es automatisch
-        # mit der nächsten Frage weiter.
+        # Danach kommt automatisch die nächste Frage.
 
     # Bewerbung abgeschlossen.
     await user.send(
@@ -710,7 +660,7 @@ async def start_developer_application(user):
 
 
 # ============================================================
-# BEWERBUNG INS TEAM-KANAL SENDEN
+# BEWERBUNG AN TEAM
 # ============================================================
 
 async def send_application_to_team(
@@ -723,8 +673,9 @@ async def send_application_to_team(
     )
 
     if channel is None:
+
         print(
-            "❌ Bewerbungs-Review-Kanal wurde nicht gefunden!"
+            "❌ Bewerbungs-Kanal wurde nicht gefunden."
         )
 
         return
@@ -753,7 +704,6 @@ async def send_application_to_team(
             f"{answer}"
         )
 
-        # Discord-Feldlimit beachten.
         if len(value) > 1024:
             value = value[:1021] + "..."
 
@@ -772,12 +722,12 @@ async def send_application_to_team(
     )
 
     print(
-        f"✅ Developer-Bewerbung von {user} wurde gesendet."
+        f"✅ Bewerbung von {user} wurde an das Team gesendet."
     )
 
 
 # ============================================================
-# BEWERBUNGS-PANEL
+# DEVELOPER PANEL
 # ============================================================
 
 async def send_application_panel():
@@ -787,9 +737,11 @@ async def send_application_panel():
     )
 
     if channel is None:
+
         print(
             "❌ Developer-Bewerbungskanal wurde nicht gefunden."
         )
+
         return
 
     # Prüfen, ob bereits ein Panel vorhanden ist.
@@ -809,9 +761,11 @@ async def send_application_panel():
                 message.embeds[0].title
                 == "👨‍💻 Developer Bewerbung"
             ):
+
                 print(
-                    "✅ Developer-Bewerbungs-Panel existiert bereits."
+                    "✅ Developer-Panel existiert bereits."
                 )
+
                 return
 
     except discord.Forbidden:
@@ -828,7 +782,8 @@ async def send_application_panel():
             "**Hier Bewerben Als Developer!**\n\n"
             "Viel Glück!\n\n"
             "Du möchtest unser Developer-Team unterstützen?\n"
-            "Klicke unten auf **Bewerben**, um deine Bewerbung zu starten."
+            "Klicke unten auf **Bewerben**, "
+            "um deine Bewerbung zu starten."
         ),
         color=discord.Color.blurple()
     )
@@ -843,12 +798,12 @@ async def send_application_panel():
     )
 
     print(
-        "✅ Developer-Bewerbungs-Panel erstellt."
+        "✅ Developer-Panel erstellt."
     )
 
 
 # ============================================================
-# BOT KLASSE
+# BOT-KLASSE
 # ============================================================
 
 class QuizBot(
@@ -857,7 +812,8 @@ class QuizBot(
 
     async def setup_hook(self):
 
-        # Wichtig für den Button nach Neustarts.
+        # Persistenter Button.
+        # Dadurch funktioniert er auch nach Neustarts.
         self.add_view(
             DeveloperApplicationView()
         )
@@ -869,30 +825,27 @@ bot = QuizBot(
 
 
 # ============================================================
-# BOT READY
+# ON READY
 # ============================================================
-
-started = False
-
 
 @bot.event
 async def on_ready():
 
-    global started
+    global startup_finished
 
     print(
         f"✅ Bot ist online als {bot.user}"
     )
 
-    # on_ready kann bei einer Verbindung erneut aufgerufen werden.
-    if started:
+    # on_ready kann bei Reconnect erneut ausgeführt werden.
+    if startup_finished:
         return
 
-    started = True
+    startup_finished = True
 
-    # ========================================================
-    # EMOJI-QUIZ STARTEN
-    # ========================================================
+    # --------------------------------------------------------
+    # QUIZ
+    # --------------------------------------------------------
 
     quiz_channel = bot.get_channel(
         QUIZ_CHANNEL_ID
@@ -900,17 +853,21 @@ async def on_ready():
 
     if quiz_channel is not None:
 
+        await cleanup_old_quizzes(
+            quiz_channel
+        )
+
         await send_new_quiz()
 
     else:
 
         print(
-            "❌ Emoji-Quiz-Kanal nicht gefunden."
+            "❌ Quiz-Kanal nicht gefunden."
         )
 
-    # ========================================================
-    # DEVELOPER-PANEL
-    # ========================================================
+    # --------------------------------------------------------
+    # DEVELOPER-BEWERBUNG
+    # --------------------------------------------------------
 
     await send_application_panel()
 
@@ -925,11 +882,11 @@ async def on_message(message):
     global current_quiz
     global current_quiz_message
 
-    # Eigene Nachrichten ignorieren.
+    # Eigene Bot-Nachrichten ignorieren.
     if message.author == bot.user:
         return
 
-    # Nur im Quiz-Kanal auswerten.
+    # Nur im Quiz-Kanal reagieren.
     if message.channel.id != QUIZ_CHANNEL_ID:
         return
 
@@ -955,11 +912,11 @@ async def on_message(message):
 
         async with quiz_lock:
 
-            # Prüfen, ob das Quiz noch aktiv ist.
+            # Prüfen, ob noch dasselbe Quiz aktiv ist.
             if current_quiz is None:
                 return
 
-            # Alte Ergebnis-Nachricht des Users löschen.
+            # Alte Ergebnis-Nachricht dieses Users löschen.
             await delete_previous_result(
                 user,
                 message.channel
@@ -974,16 +931,16 @@ async def on_message(message):
                 user.id
             ] = result_message
 
-            # Altes Quiz speichern.
-            old_quiz = current_quiz_message
+            # Altes Quiz merken.
+            old_quiz_message = current_quiz_message
 
-            # Status löschen.
+            # Quiz deaktivieren.
             current_quiz = None
             current_quiz_message = None
 
             # Altes Quiz löschen.
             await safe_delete(
-                old_quiz
+                old_quiz_message
             )
 
             # Neues Quiz.
@@ -995,7 +952,7 @@ async def on_message(message):
     # FALSCH
     # ========================================================
 
-    # Alte Ergebnis-Nachricht des Users löschen.
+    # Alte Ergebnis-Nachricht dieses Users löschen.
     await delete_previous_result(
         user,
         message.channel
@@ -1021,6 +978,7 @@ TOKEN = os.environ.get(
 )
 
 if not TOKEN:
+
     raise RuntimeError(
         "❌ DISCORD_TOKEN wurde nicht gefunden. "
         "Prüfe dein GitHub Secret."
@@ -1028,7 +986,7 @@ if not TOKEN:
 
 
 # ============================================================
-# START
+# BOT STARTEN
 # ============================================================
 
 bot.run(
