@@ -1,4 +1,3 @@
-```python
 import os
 import json
 import random
@@ -2907,6 +2906,4 @@ Die wichtigsten Commands sind jetzt:
 !devtask <Aufgabe>
 !devclaim <ID>
 !devdone <ID>
-```
-
 `!quiz` ist ausschließlich für die Rolle `1530188150456979526` freigeschaltet. `!top` und `!punkte` bleiben für alle nutzbar.
