@@ -1,3 +1,4 @@
+```python
 import os
 import random
 import re
@@ -17,6 +18,9 @@ APPLICATION_CHANNEL_ID = 1541391365219295343
 
 # Kanal für fertige Developer-Bewerbungen
 REVIEW_CHANNEL_ID = 1548404201493762181
+
+# Rolle für angenommene Developer
+DEVELOPER_ROLE_ID = 1541393345295683634
 
 
 # ============================================================
@@ -230,22 +234,16 @@ intents.message_content = True
 current_quiz = None
 current_quiz_message = None
 
-# Letzte Ergebnis-Nachricht pro User
 last_result_messages = {}
 
-# Aktive Bewerbungen
 active_applications = set()
 
-# Verhindert gleichzeitige Quiz-Wechsel
 quiz_lock = asyncio.Lock()
 
-# Shuffle-Bag
 quiz_bag = []
 
-# Letztes Emoji-Set
 last_quiz_emojis = set()
 
-# Start einmalig ausführen
 startup_finished = False
 
 
@@ -297,10 +295,6 @@ async def safe_delete(message):
 
 
 async def delete_previous_result(user, channel):
-    """
-    Jeder User besitzt nur eine Ergebnis-Nachricht.
-    Beim nächsten Ergebnis wird die alte Nachricht gelöscht.
-    """
 
     user_id = user.id
 
@@ -356,6 +350,7 @@ async def delete_previous_result(user, channel):
 # ============================================================
 
 def refill_quiz_bag():
+
     global quiz_bag
 
     quiz_bag = list(
@@ -368,6 +363,7 @@ def refill_quiz_bag():
 
 
 def get_next_quiz():
+
     global quiz_bag
     global last_quiz_emojis
 
@@ -384,8 +380,11 @@ def get_next_quiz():
             emojis
             & last_quiz_emojis
         ):
+
             quiz_bag.pop(position)
+
             last_quiz_emojis = emojis
+
             return QUIZZES[index]
 
     index = quiz_bag.pop(0)
@@ -490,16 +489,20 @@ async def cleanup_old_quizzes(channel):
 
 
 # ============================================================
-# BEWERBUNGS-ENTSCHEIDUNG
+# BEWERBUNG ABLEHNEN - MODAL
 # ============================================================
 
-class RejectApplicationModal(discord.ui.Modal, title="Bewerbung ablehnen"):
+class RejectApplicationModal(
+    discord.ui.Modal,
+    title="Bewerbung ablehnen"
+):
 
     reason = discord.ui.TextInput(
         label="Grund für die Ablehnung",
-        placeholder="Schreibe hier den Grund...",
+        placeholder="Bitte schreibe hier den Grund...",
         style=discord.TextStyle.paragraph,
         required=True,
+        min_length=1,
         max_length=1000
     )
 
@@ -507,13 +510,28 @@ class RejectApplicationModal(discord.ui.Modal, title="Bewerbung ablehnen"):
         super().__init__()
         self.user = user
 
-    async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(
+        self,
+        interaction: discord.Interaction
+    ):
 
+        reason = self.reason.value.strip()
+
+        # Bewerber bekommt den Grund per DM
         try:
+
             await self.user.send(
-                "❌ **Deine Developer-Bewerbung wurde abgelehnt.**\n\n"
-                f"**Grund:** {self.reason.value}"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "❌ **DEVELOPER-BEWERBUNG**\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "Leider wurde deine Developer-Bewerbung "
+                "abgelehnt.\n\n"
+                f"📝 **Grund:**\n"
+                f"{reason}\n\n"
+                "Vielen Dank trotzdem für dein Interesse!\n"
+                "━━━━━━━━━━━━━━━━━━━━"
             )
+
         except discord.Forbidden:
             pass
 
@@ -523,33 +541,45 @@ class RejectApplicationModal(discord.ui.Modal, title="Bewerbung ablehnen"):
         )
 
         # Buttons deaktivieren
-        if self.user is not None:
-            message = interaction.message
+        try:
 
-            if message is not None and message.components:
-                for item in message.components:
-                    pass
-
-            try:
-                view = ApplicationDecisionView(
-                    self.user
-                )
-
-                for child in view.children:
-                    child.disabled = True
-
-                await message.edit(
-                    view=view
-                )
-            except Exception:
+            for child in interaction.message.components:
                 pass
 
+            view = ApplicationDecisionView(
+                self.user
+            )
 
-class ApplicationDecisionView(discord.ui.View):
+            for child in view.children:
+                child.disabled = True
+
+            await interaction.message.edit(
+                view=view
+            )
+
+        except Exception:
+            pass
+
+
+# ============================================================
+# BEWERBUNGS-BUTTONS
+# ============================================================
+
+class ApplicationDecisionView(
+    discord.ui.View
+):
 
     def __init__(self, user):
-        super().__init__(timeout=None)
+
+        super().__init__(
+            timeout=None
+        )
+
         self.user = user
+
+    # --------------------------------------------------------
+    # ANNEHMEN
+    # --------------------------------------------------------
 
     @discord.ui.button(
         label="Annehm",
@@ -563,30 +593,102 @@ class ApplicationDecisionView(discord.ui.View):
         button: discord.ui.Button
     ):
 
-        try:
-            await self.user.send(
-                "✅ **Deine Developer-Bewerbung wurde angenommen!**\n\n"
-                "Herzlichen Glückwunsch!"
+        # Server des Bewerbers holen
+        guild = interaction.guild
+
+        if guild is None:
+
+            await interaction.response.send_message(
+                "❌ Server konnte nicht gefunden werden.",
+                ephemeral=True
             )
+
+            return
+
+        # Rolle holen
+        role = guild.get_role(
+            DEVELOPER_ROLE_ID
+        )
+
+        if role is None:
+
+            await interaction.response.send_message(
+                "❌ Die Developer-Rolle wurde nicht gefunden.",
+                ephemeral=True
+            )
+
+            return
+
+        # Rolle vergeben
+        try:
+
+            await self.user.add_roles(
+                role,
+                reason="Developer-Bewerbung angenommen"
+            )
+
+        except discord.Forbidden:
+
+            await interaction.response.send_message(
+                "❌ Ich kann die Developer-Rolle nicht vergeben. "
+                "Prüfe meine Berechtigung 'Rollen verwalten' "
+                "und stelle sicher, dass meine Bot-Rolle über "
+                "der Developer-Rolle steht.",
+                ephemeral=True
+            )
+
+            return
+
+        except discord.HTTPException as error:
+
+            await interaction.response.send_message(
+                f"❌ Fehler beim Vergeben der Rolle: {error}",
+                ephemeral=True
+            )
+
+            return
+
+        # Bewerber bekommt DM
+        try:
+
+            await self.user.send(
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "✅ **DEVELOPER-BEWERBUNG**\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "Herzlichen Glückwunsch! 🎉\n\n"
+                "Deine Developer-Bewerbung wurde "
+                "**angenommen**.\n\n"
+                "Dir wurde die Developer-Rolle auf dem "
+                "Server zugewiesen.\n\n"
+                "Willkommen im Team! 👨‍💻\n"
+                "━━━━━━━━━━━━━━━━━━━━"
+            )
+
         except discord.Forbidden:
             pass
 
         await interaction.response.send_message(
-            "🟢 Die Bewerbung wurde angenommen.",
+            f"🟢 Die Bewerbung wurde angenommen.\n"
+            f"✅ {role.mention} wurde an {self.user.mention} vergeben.",
             ephemeral=True
         )
 
-        button.disabled = True
-
+        # Beide Buttons deaktivieren
         for child in self.children:
             child.disabled = True
 
         try:
+
             await interaction.message.edit(
                 view=self
             )
+
         except Exception:
             pass
+
+    # --------------------------------------------------------
+    # ABLEHNEN
+    # --------------------------------------------------------
 
     @discord.ui.button(
         label="Ablehn",
@@ -616,6 +718,7 @@ class DeveloperApplicationView(
 ):
 
     def __init__(self):
+
         super().__init__(
             timeout=None
         )
@@ -652,15 +755,18 @@ class DeveloperApplicationView(
             try:
 
                 await user.send(
-                    "👨‍💻 **Developer-Bewerbung**\n\n"
-                    "Vielen Dank für dein Interesse an unserem Developer-Team!\n\n"
-                    "Die Bewerbung besteht aus **9 Fragen**.\n"
-                    "Die Fragen kommen **einzeln**.\n\n"
-                    "Du beantwortest Frage 1 → "
-                    "danach kommt Frage 2 → "
-                    "bis Frage 9.\n\n"
-                    "Schreibe **abbrechen**, wenn du die Bewerbung "
-                    "beenden möchtest."
+                    "━━━━━━━━━━━━━━━━━━━━\n"
+                    "👨‍💻 **DEVELOPER-BEWERBUNG**\n"
+                    "━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "Vielen Dank für dein Interesse an "
+                    "unserem Developer-Team! ❤️\n\n"
+                    "📋 **Ablauf**\n"
+                    "• Insgesamt 9 Fragen\n"
+                    "• Jede Frage kommt einzeln\n"
+                    "• Antworte einfach direkt auf die Frage\n"
+                    "• Schreibe `abbrechen`, wenn du aufhören möchtest\n\n"
+                    "Viel Erfolg bei deiner Bewerbung! 🍀\n"
+                    "━━━━━━━━━━━━━━━━━━━━"
                 )
 
             except discord.Forbidden:
@@ -715,8 +821,11 @@ async def start_developer_application(user):
     ):
 
         await user.send(
-            f"**Frage {number}/9**\n\n"
-            f"{question}"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"📋 **FRAGE {number}/9**\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"❓ {question}\n\n"
+            "✏️ **Deine Antwort:**"
         )
 
         try:
@@ -730,8 +839,12 @@ async def start_developer_application(user):
         except asyncio.TimeoutError:
 
             await user.send(
-                "⏰ Deine Bewerbung wurde beendet, "
-                "weil du zu lange nicht geantwortet hast."
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "⏰ **BEWERBUNG BEENDET**\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "Du hast zu lange nicht geantwortet.\n"
+                "Wenn du dich erneut bewerben möchtest, "
+                "kannst du den Bewerben-Button erneut drücken."
             )
 
             return
@@ -741,7 +854,10 @@ async def start_developer_application(user):
         if normalize(answer) == "abbrechen":
 
             await user.send(
-                "❌ Deine Developer-Bewerbung wurde abgebrochen."
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "❌ **BEWERBUNG ABGEBROCHEN**\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "Deine Developer-Bewerbung wurde abgebrochen."
             )
 
             return
@@ -750,10 +866,20 @@ async def start_developer_application(user):
             answer
         )
 
+        # Kleine Trennung zwischen den Fragen
+        await user.send(
+            "✅ **Antwort gespeichert!**\n"
+            "➡️ Weiter zur nächsten Frage..."
+        )
+
     await user.send(
-        "✅ **Developer-Bewerbung abgeschlossen!**\n\n"
-        "Vielen Dank für deine Bewerbung.\n"
-        "Deine Antworten wurden erfolgreich übermittelt."
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "✅ **BEWERBUNG ABGESCHLOSSEN**\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Vielen Dank für deine Bewerbung! ❤️\n\n"
+        "Deine Antworten wurden erfolgreich "
+        "an das Developer-Team übermittelt.\n\n"
+        "⏳ Das Team wird deine Bewerbung nun prüfen."
     )
 
     await send_application_to_team(
@@ -820,7 +946,7 @@ async def send_application_to_team(
         text="Developer Bewerbungssystem"
     )
 
-    # Bewerbung + Buttons senden
+    # Bewerbung mit Annehm-/Ablehn-Buttons
     await channel.send(
         embed=embed,
         view=ApplicationDecisionView(user)
@@ -984,15 +1110,12 @@ async def on_message(message):
     global current_quiz
     global current_quiz_message
 
-    # Eigene Bot-Nachrichten ignorieren.
     if message.author == bot.user:
         return
 
-    # Nur im Quiz-Kanal reagieren.
     if message.channel.id != QUIZ_CHANNEL_ID:
         return
 
-    # Kein Quiz aktiv.
     if current_quiz is None:
         return
 
@@ -1085,3 +1208,4 @@ if not TOKEN:
 bot.run(
     TOKEN
 )
+```
