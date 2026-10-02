@@ -304,7 +304,6 @@ async def delete_previous_result(user, channel):
 
     user_id = user.id
 
-    # Zuerst die gespeicherte Nachricht verwenden.
     old_message = last_result_messages.get(
         user_id
     )
@@ -322,8 +321,6 @@ async def delete_previous_result(user, channel):
 
         return
 
-    # Fallback nach Neustart:
-    # letzte passende Bot-Nachricht suchen.
     try:
 
         async for message in channel.history(
@@ -377,8 +374,6 @@ def get_next_quiz():
     if not quiz_bag:
         refill_quiz_bag()
 
-    # Versuchen, ein Quiz ohne gemeinsame Emojis
-    # mit dem vorherigen Quiz zu finden.
     for position, index in enumerate(quiz_bag):
 
         emojis = set(
@@ -393,8 +388,6 @@ def get_next_quiz():
             last_quiz_emojis = emojis
             return QUIZZES[index]
 
-    # Falls kein passendes gefunden wurde,
-    # trotzdem das nächste aus dem Bag nehmen.
     index = quiz_bag.pop(0)
 
     last_quiz_emojis = set(
@@ -497,6 +490,124 @@ async def cleanup_old_quizzes(channel):
 
 
 # ============================================================
+# BEWERBUNGS-ENTSCHEIDUNG
+# ============================================================
+
+class RejectApplicationModal(discord.ui.Modal, title="Bewerbung ablehnen"):
+
+    reason = discord.ui.TextInput(
+        label="Grund für die Ablehnung",
+        placeholder="Schreibe hier den Grund...",
+        style=discord.TextStyle.paragraph,
+        required=True,
+        max_length=1000
+    )
+
+    def __init__(self, user):
+        super().__init__()
+        self.user = user
+
+    async def on_submit(self, interaction: discord.Interaction):
+
+        try:
+            await self.user.send(
+                "❌ **Deine Developer-Bewerbung wurde abgelehnt.**\n\n"
+                f"**Grund:** {self.reason.value}"
+            )
+        except discord.Forbidden:
+            pass
+
+        await interaction.response.send_message(
+            "🔴 Die Bewerbung wurde abgelehnt.",
+            ephemeral=True
+        )
+
+        # Buttons deaktivieren
+        if self.user is not None:
+            message = interaction.message
+
+            if message is not None and message.components:
+                for item in message.components:
+                    pass
+
+            try:
+                view = ApplicationDecisionView(
+                    self.user
+                )
+
+                for child in view.children:
+                    child.disabled = True
+
+                await message.edit(
+                    view=view
+                )
+            except Exception:
+                pass
+
+
+class ApplicationDecisionView(discord.ui.View):
+
+    def __init__(self, user):
+        super().__init__(timeout=None)
+        self.user = user
+
+    @discord.ui.button(
+        label="Annehm",
+        emoji="✅",
+        style=discord.ButtonStyle.success,
+        custom_id="application_accept"
+    )
+    async def accept(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        try:
+            await self.user.send(
+                "✅ **Deine Developer-Bewerbung wurde angenommen!**\n\n"
+                "Herzlichen Glückwunsch!"
+            )
+        except discord.Forbidden:
+            pass
+
+        await interaction.response.send_message(
+            "🟢 Die Bewerbung wurde angenommen.",
+            ephemeral=True
+        )
+
+        button.disabled = True
+
+        for child in self.children:
+            child.disabled = True
+
+        try:
+            await interaction.message.edit(
+                view=self
+            )
+        except Exception:
+            pass
+
+    @discord.ui.button(
+        label="Ablehn",
+        emoji="❌",
+        style=discord.ButtonStyle.danger,
+        custom_id="application_reject"
+    )
+    async def reject(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        await interaction.response.send_modal(
+            RejectApplicationModal(
+                self.user
+            )
+        )
+
+
+# ============================================================
 # DEVELOPER-BUTTON
 # ============================================================
 
@@ -538,7 +649,6 @@ class DeveloperApplicationView(
 
         try:
 
-            # DM öffnen
             try:
 
                 await user.send(
@@ -604,13 +714,11 @@ async def start_developer_application(user):
         start=1
     ):
 
-        # Genau eine Frage senden.
         await user.send(
             f"**Frage {number}/9**\n\n"
             f"{question}"
         )
 
-        # Warten, bis der User antwortet.
         try:
 
             answer_message = await bot.wait_for(
@@ -630,7 +738,6 @@ async def start_developer_application(user):
 
         answer = answer_message.content.strip()
 
-        # Bewerbung abbrechen.
         if normalize(answer) == "abbrechen":
 
             await user.send(
@@ -639,14 +746,10 @@ async def start_developer_application(user):
 
             return
 
-        # Antwort speichern.
         answers.append(
             answer
         )
 
-        # Danach kommt automatisch die nächste Frage.
-
-    # Bewerbung abgeschlossen.
     await user.send(
         "✅ **Developer-Bewerbung abgeschlossen!**\n\n"
         "Vielen Dank für deine Bewerbung.\n"
@@ -717,8 +820,10 @@ async def send_application_to_team(
         text="Developer Bewerbungssystem"
     )
 
+    # Bewerbung + Buttons senden
     await channel.send(
-        embed=embed
+        embed=embed,
+        view=ApplicationDecisionView(user)
     )
 
     print(
@@ -744,7 +849,6 @@ async def send_application_panel():
 
         return
 
-    # Prüfen, ob bereits ein Panel vorhanden ist.
     try:
 
         async for message in channel.history(
@@ -812,8 +916,7 @@ class QuizBot(
 
     async def setup_hook(self):
 
-        # Persistenter Button.
-        # Dadurch funktioniert er auch nach Neustarts.
+        # Persistenter Bewerben-Button
         self.add_view(
             DeveloperApplicationView()
         )
@@ -837,7 +940,6 @@ async def on_ready():
         f"✅ Bot ist online als {bot.user}"
     )
 
-    # on_ready kann bei Reconnect erneut ausgeführt werden.
     if startup_finished:
         return
 
@@ -912,17 +1014,14 @@ async def on_message(message):
 
         async with quiz_lock:
 
-            # Prüfen, ob noch dasselbe Quiz aktiv ist.
             if current_quiz is None:
                 return
 
-            # Alte Ergebnis-Nachricht dieses Users löschen.
             await delete_previous_result(
                 user,
                 message.channel
             )
 
-            # Neue Richtig-Nachricht.
             result_message = await message.channel.send(
                 f"✅ {user.mention} Richtig!"
             )
@@ -931,19 +1030,15 @@ async def on_message(message):
                 user.id
             ] = result_message
 
-            # Altes Quiz merken.
             old_quiz_message = current_quiz_message
 
-            # Quiz deaktivieren.
             current_quiz = None
             current_quiz_message = None
 
-            # Altes Quiz löschen.
             await safe_delete(
                 old_quiz_message
             )
 
-            # Neues Quiz.
             await send_new_quiz()
 
         return
@@ -952,13 +1047,11 @@ async def on_message(message):
     # FALSCH
     # ========================================================
 
-    # Alte Ergebnis-Nachricht dieses Users löschen.
     await delete_previous_result(
         user,
         message.channel
     )
 
-    # Neue Falsch-Nachricht.
     result_message = await message.channel.send(
         f"❌ {user.mention} Leider falsch! "
         "Nächster Versuch, vielleicht wird's dann!"
