@@ -3,7 +3,7 @@ import json
 import random
 import asyncio
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 
 import discord
 from discord.ext import commands
@@ -23,6 +23,8 @@ NAMETAG_ROLE_ID = 1520102928398942348
 
 NAMETAG = "RLP "
 DATA_FILE = "bot_data.json"
+
+MAX_NICKNAME_LENGTH = 32
 
 
 # =========================================================
@@ -45,13 +47,17 @@ current_quiz = None
 current_quiz_message = None
 
 quiz_bag = []
+
 quiz_lock = asyncio.Lock()
+quiz_answer_lock = asyncio.Lock()
 
 startup_finished = False
 
+active_applications = set()
+
 
 # =========================================================
-# DATEN SPEICHERN / LADEN
+# DATEN LADEN
 # =========================================================
 
 def load_data():
@@ -59,60 +65,141 @@ def load_data():
     global quiz_scores
 
     try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
+        with open(DATA_FILE, "r", encoding="utf-8") as file:
+            data = json.load(file)
 
-        nametag_removed_users = set(
-            str(x) for x in data.get("nametag_removed_users", [])
-        )
-
-        quiz_scores = {
-            str(k): int(v)
-            for k, v in data.get("quiz_scores", {}).items()
+        nametag_removed_users = {
+            str(user_id)
+            for user_id in data.get(
+                "nametag_removed_users",
+                []
+            )
         }
 
-    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+        quiz_scores = {
+            str(user_id): int(score)
+            for user_id, score in data.get(
+                "quiz_scores",
+                {}
+            ).items()
+        }
+
+        print(
+            f"[DATA] {len(nametag_removed_users)} "
+            f"RLP-Ausnahmen geladen."
+        )
+
+        print(
+            f"[DATA] {len(quiz_scores)} "
+            f"Quiz-Spieler geladen."
+        )
+
+    except FileNotFoundError:
+
         nametag_removed_users = set()
         quiz_scores = {}
 
+        print(
+            "[DATA] Keine gespeicherten Daten gefunden. "
+            "Neue Datei wird erstellt."
+        )
+
+    except (json.JSONDecodeError, ValueError) as error:
+
+        nametag_removed_users = set()
+        quiz_scores = {}
+
+        print(
+            f"[DATA] Fehler beim Laden der Daten: {error}"
+        )
+
+
+# =========================================================
+# DATEN SPEICHERN
+# =========================================================
 
 def save_data():
+
     data = {
-        "nametag_removed_users": list(nametag_removed_users),
+        "nametag_removed_users": list(
+            nametag_removed_users
+        ),
         "quiz_scores": quiz_scores
     }
 
     try:
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4, ensure_ascii=False)
-    except Exception as e:
-        print(f"[DATA] Fehler beim Speichern: {e}")
+
+        with open(
+            DATA_FILE,
+            "w",
+            encoding="utf-8"
+        ) as file:
+
+            json.dump(
+                data,
+                file,
+                indent=4,
+                ensure_ascii=False
+            )
+
+    except Exception as error:
+
+        print(
+            f"[DATA] Fehler beim Speichern: {error}"
+        )
 
 
 # =========================================================
 # HILFSFUNKTIONEN
 # =========================================================
 
+def now_utc():
+    return datetime.now(timezone.utc)
+
+
 def normalize(text):
-    return re.sub(r"\s+", " ", text.strip()).lower()
+    return re.sub(
+        r"\s+",
+        " ",
+        text.strip()
+    ).lower()
 
 
 async def safe_delete(message):
+
+    if message is None:
+        return
+
     try:
         await message.delete()
-    except Exception:
+
+    except (
+        discord.NotFound,
+        discord.Forbidden,
+        discord.HTTPException
+    ):
         pass
 
 
+def get_member_display_name(member):
+
+    return (
+        member.display_name
+        if member
+        else "Unbekannter Benutzer"
+    )
+
+
 # =========================================================
 # =========================================================
-#                     EMOJI QUIZ
+#                         EMOJI QUIZ
 # =========================================================
 # =========================================================
 
-# ---------------------------------------------------------
-# BASISDATEN FÜR SEHR VIELE FRAGEN
-# ---------------------------------------------------------
+
+# =========================================================
+# LÄNDER
+# =========================================================
 
 COUNTRIES = [
     ("🇩🇪", "Deutschland"),
@@ -144,6 +231,7 @@ COUNTRIES = [
     ("🇷🇸", "Serbien"),
     ("🇺🇦", "Ukraine"),
     ("🇹🇷", "Türkei"),
+    ("🇷🇺", "Russland"),
     ("🇺🇸", "USA"),
     ("🇨🇦", "Kanada"),
     ("🇲🇽", "Mexiko"),
@@ -167,6 +255,7 @@ COUNTRIES = [
     ("🇪🇬", "Ägypten"),
     ("🇲🇦", "Marokko"),
     ("🇹🇳", "Tunesien"),
+    ("🇩🇿", "Algerien"),
     ("🇳🇬", "Nigeria"),
     ("🇰🇪", "Kenia"),
     ("🇸🇦", "Saudi-Arabien"),
@@ -179,8 +268,13 @@ COUNTRIES = [
     ("🇳🇵", "Nepal"),
     ("🇸🇬", "Singapur"),
     ("🇲🇾", "Malaysia"),
+    ("🇵🇭", "Philippinen"),
 ]
 
+
+# =========================================================
+# FARBEN
+# =========================================================
 
 COLORS = [
     ("🔴", "Rot"),
@@ -197,6 +291,10 @@ COLORS = [
     ("🩶", "Grau"),
 ]
 
+
+# =========================================================
+# TIERE
+# =========================================================
 
 ANIMALS = [
     ("🐶", "Hund"),
@@ -245,8 +343,19 @@ ANIMALS = [
     ("🐪", "Kamel"),
     ("🦘", "Känguru"),
     ("🦓", "Zebra"),
+    ("🦍", "Gorilla"),
+    ("🐆", "Leopard"),
+    ("🦌", "Hirsch"),
+    ("🐑", "Schaf"),
+    ("🐐", "Ziege"),
+    ("🐕", "Hund"),
+    ("🐈", "Katze"),
 ]
 
+
+# =========================================================
+# ESSEN
+# =========================================================
 
 FOOD = [
     ("🍕", "Pizza"),
@@ -270,7 +379,6 @@ FOOD = [
     ("🥞", "Pfannkuchen"),
     ("🧇", "Waffel"),
     ("🍗", "Hähnchen"),
-    ("🌭", "Hotdog"),
     ("🥗", "Salat"),
     ("🍎", "Apfel"),
     ("🍌", "Banane"),
@@ -290,8 +398,16 @@ FOOD = [
     ("🍰", "Kuchen"),
     ("🍦", "Eis"),
     ("🍿", "Popcorn"),
+    ("🥪", "Sandwich"),
+    ("🌯", "Wrap"),
+    ("🥓", "Speck"),
+    ("🌽", "Mais"),
 ]
 
+
+# =========================================================
+# GETRÄNKE
+# =========================================================
 
 DRINKS = [
     ("💧", "Wasser"),
@@ -304,6 +420,10 @@ DRINKS = [
     ("🍋", "Limonade"),
 ]
 
+
+# =========================================================
+# FAHRZEUGE
+# =========================================================
 
 VEHICLES = [
     ("🚗", "Auto"),
@@ -326,8 +446,14 @@ VEHICLES = [
     ("🚁", "Hubschrauber"),
     ("🚢", "Schiff"),
     ("⛵", "Segelboot"),
+    ("🚀", "Rakete"),
+    ("🚂", "Dampflok"),
 ]
 
+
+# =========================================================
+# SPORT
+# =========================================================
 
 SPORTS = [
     ("⚽", "Fußball"),
@@ -348,8 +474,15 @@ SPORTS = [
     ("🏎️", "Rennsport"),
     ("🏋️", "Gewichtheben"),
     ("🤸", "Turnen"),
+    ("🏹", "Bogenschießen"),
+    ("⛳", "Golf"),
+    ("🥌", "Curling"),
 ]
 
+
+# =========================================================
+# NATUR
+# =========================================================
 
 NATURE = [
     ("🌳", "Baum"),
@@ -376,8 +509,14 @@ NATURE = [
     ("⛈️", "Gewitter"),
     ("❄️", "Schnee"),
     ("🔥", "Feuer"),
+    ("🌪️", "Tornado"),
+    ("🌌", "Sternenhimmel"),
 ]
 
+
+# =========================================================
+# TECHNIK
+# =========================================================
 
 TECH = [
     ("📱", "Smartphone"),
@@ -396,8 +535,15 @@ TECH = [
     ("⌚", "Smartwatch"),
     ("🕹️", "Controller"),
     ("💿", "CD"),
+    ("📻", "Radio"),
+    ("🎮", "Spielekonsole"),
+    ("🛰️", "Satellit"),
 ]
 
+
+# =========================================================
+# BERUFE
+# =========================================================
 
 JOBS = [
     ("👮", "Polizist"),
@@ -415,8 +561,15 @@ JOBS = [
     ("🧑‍🚀", "Astronaut"),
     ("🕵️", "Detektiv"),
     ("👨‍⚖️", "Richter"),
+    ("👨‍🎨", "Künstler"),
+    ("🧑‍🔬", "Wissenschaftler"),
+    ("👨‍🌾", "Landwirt"),
 ]
 
+
+# =========================================================
+# GEGENSTÄNDE
+# =========================================================
 
 OBJECTS = [
     ("🔑", "Schlüssel"),
@@ -437,323 +590,418 @@ OBJECTS = [
     ("🚪", "Tür"),
     ("🪟", "Fenster"),
     ("🧹", "Besen"),
+    ("📦", "Paket"),
+    ("🪥", "Zahnbürste"),
+    ("🧴", "Flasche"),
+    ("🕶️", "Sonnenbrille"),
 ]
 
 
-# ---------------------------------------------------------
-# HILFSFUNKTION FÜR ANTWORTEN
-# ---------------------------------------------------------
+# =========================================================
+# QUIZ-ANTWORTEN
+# =========================================================
+
+def get_unique_labels(pool):
+
+    result = []
+    seen = set()
+
+    for emoji, label in pool:
+
+        if label in seen:
+            continue
+
+        seen.add(label)
+        result.append(
+            (emoji, label)
+        )
+
+    return result
+
 
 def make_options(correct, pool, amount=4):
-    values = [x[1] for x in pool if x[1] != correct]
 
-    random.shuffle(values)
+    unique_pool = get_unique_labels(pool)
 
-    selected = values[:amount - 1]
-    selected.append(correct)
+    wrong = [
+        item
+        for item in unique_pool
+        if item[1] != correct
+    ]
+
+    if len(wrong) < amount - 1:
+        return []
+
+    selected_wrong = random.sample(
+        wrong,
+        amount - 1
+    )
+
+    selected = selected_wrong + [
+        next(
+            item
+            for item in unique_pool
+            if item[1] == correct
+        )
+    ]
 
     random.shuffle(selected)
 
     return selected
 
 
-def emoji_from_name(name, pool):
-    for emoji, label in pool:
-        if label == name:
-            return emoji
-    return "❓"
+def create_quiz(
+    question,
+    correct,
+    pool,
+    hint
+):
 
+    options = make_options(
+        correct,
+        pool
+    )
 
-def create_quiz(question, correct, pool, hint):
-    options = make_options(correct, pool)
-
-    option_emojis = [
-        emoji_from_name(option, pool)
-        for option in options
-    ]
+    if len(options) != 4:
+        return None
 
     return {
         "question": question,
-        "answers": [
-            (option_emojis[i], options[i])
-            for i in range(4)
-        ],
+        "answers": options,
         "correct": correct,
         "hint": hint
     }
 
 
-# ---------------------------------------------------------
-# SEHR GROSSER QUIZ-POOL
-# ---------------------------------------------------------
+# =========================================================
+# QUIZ-POOL ERSTELLEN
+# =========================================================
 
 def build_quizzes():
 
     quizzes = []
 
-    # =====================================================
-    # LÄNDER
-    # =====================================================
+    # -----------------------------------------------------
+    # Kategorien
+    # -----------------------------------------------------
 
-    for emoji, country in COUNTRIES:
-        quizzes.append(
-            create_quiz(
-                f"🌍 Welche Flagge gehört zu **{country}**?",
-                country,
-                COUNTRIES,
-                "Schau dir die Farben und das Muster der Flagge genau an."
+    category_data = [
+        (
+            COUNTRIES,
+            "🌍 Welche Flagge gehört zu **{answer}**?",
+            "Schau dir die Flaggenfarben und das Muster genau an."
+        ),
+        (
+            COLORS,
+            "🎨 Welche Farbe wird durch {emoji} dargestellt?",
+            "Überlege, welche Farbe das Emoji zeigt."
+        ),
+        (
+            ANIMALS,
+            "🐾 Welches Tier wird durch {emoji} dargestellt?",
+            "Achte auf die typische Darstellung des Tieres."
+        ),
+        (
+            FOOD,
+            "🍽️ Was wird durch {emoji} dargestellt?",
+            "Überlege, welches Essen das Emoji zeigt."
+        ),
+        (
+            DRINKS,
+            "🥤 Welches Getränk wird durch {emoji} dargestellt?",
+            "Achte auf die Form des Getränkesymbols."
+        ),
+        (
+            VEHICLES,
+            "🚗 Welches Fahrzeug wird durch {emoji} dargestellt?",
+            "Überlege, welches Verkehrsmittel du siehst."
+        ),
+        (
+            SPORTS,
+            "🏆 Welche Sportart wird durch {emoji} dargestellt?",
+            "Achte auf das Sportgerät oder die Bewegung."
+        ),
+        (
+            NATURE,
+            "🌿 Was wird durch {emoji} dargestellt?",
+            "Überlege, was du in der Natur findest."
+        ),
+        (
+            TECH,
+            "💻 Welches technische Gerät wird durch {emoji} dargestellt?",
+            "Achte auf das Gerät oder technische Zubehör."
+        ),
+        (
+            JOBS,
+            "👤 Welcher Beruf wird durch {emoji} dargestellt?",
+            "Überlege, welcher Beruf zu dem Emoji passt."
+        ),
+        (
+            OBJECTS,
+            "🔎 Welcher Gegenstand wird durch {emoji} dargestellt?",
+            "Erkenne den Gegenstand anhand seiner Darstellung."
+        ),
+    ]
+
+    # -----------------------------------------------------
+    # Standard-Fragen
+    # -----------------------------------------------------
+
+    for category, template, hint in category_data:
+
+        for emoji, answer in category:
+
+            question = template.format(
+                emoji=emoji,
+                answer=answer
             )
+
+            quiz = create_quiz(
+                question,
+                answer,
+                category,
+                hint
+            )
+
+            if quiz:
+                quizzes.append(quiz)
+
+    # -----------------------------------------------------
+    # Mehrere alternative Fragestellungen
+    # -----------------------------------------------------
+
+    templates = [
+        "🔎 Welches Emoji passt zu **{answer}**?",
+        "🧠 Welches Symbol steht für **{answer}**?",
+        "🎯 Welches Emoji beschreibt **{answer}**?",
+        "❓ Welches dieser Emojis gehört zu **{answer}**?",
+        "🧐 Erkennst du **{answer}** anhand des passenden Emojis?",
+        "🎲 Finde das Emoji für **{answer}**!",
+        "✨ Welches Symbol gehört zu **{answer}**?",
+        "🏆 Wähle das richtige Emoji für **{answer}**.",
+    ]
+
+    all_categories = [
+        COUNTRIES,
+        COLORS,
+        ANIMALS,
+        FOOD,
+        DRINKS,
+        VEHICLES,
+        SPORTS,
+        NATURE,
+        TECH,
+        JOBS,
+        OBJECTS,
+    ]
+
+    for category in all_categories:
+
+        unique_category = get_unique_labels(
+            category
         )
 
-    # =====================================================
-    # FARBEN
-    # =====================================================
+        for emoji, answer in unique_category:
 
-    for emoji, color in COLORS:
-        quizzes.append(
-            {
-                "question": f"🎨 Welche Farbe wird durch {emoji} dargestellt?",
-                "answers": [
-                    (e, c)
-                    for e, c in random.sample(COLORS, 4)
-                ],
-                "correct": color,
-                "hint": "Überlege, welche Farbe das Emoji normalerweise darstellt."
-            }
-        )
+            for template in templates:
 
-    # =====================================================
-    # TIERE
-    # =====================================================
+                quiz = create_quiz(
+                    template.format(
+                        answer=answer
+                    ),
+                    answer,
+                    unique_category,
+                    "Vergleiche alle vier Emojis miteinander."
+                )
 
-    for emoji, animal in ANIMALS:
-        quizzes.append(
-            {
-                "question": f"🐾 Welches Tier wird durch {emoji} dargestellt?",
-                "answers": [
-                    (e, a)
-                    for e, a in random.sample(ANIMALS, 4)
-                ],
-                "correct": animal,
-                "hint": "Erkenne das Tier anhand seiner typischen Darstellung."
-            }
-        )
+                if quiz:
+                    quizzes.append(quiz)
 
-    # =====================================================
-    # ESSEN
-    # =====================================================
-
-    for emoji, food in FOOD:
-        quizzes.append(
-            {
-                "question": f"🍽️ Was wird durch {emoji} dargestellt?",
-                "answers": [
-                    (e, f)
-                    for e, f in random.sample(FOOD, 4)
-                ],
-                "correct": food,
-                "hint": "Überlege, welches Essen dieses Emoji zeigt."
-            }
-        )
-
-    # =====================================================
-    # GETRÄNKE
-    # =====================================================
-
-    for emoji, drink in DRINKS:
-        quizzes.append(
-            {
-                "question": f"🥤 Welches Getränk wird durch {emoji} dargestellt?",
-                "answers": [
-                    (e, d)
-                    for e, d in random.sample(DRINKS, 4)
-                ],
-                "correct": drink,
-                "hint": "Achte auf die Form und das typische Getränkesymbol."
-            }
-        )
-
-    # =====================================================
-    # FAHRZEUGE
-    # =====================================================
-
-    for emoji, vehicle in VEHICLES:
-        quizzes.append(
-            {
-                "question": f"🚗 Welches Fahrzeug wird durch {emoji} dargestellt?",
-                "answers": [
-                    (e, v)
-                    for e, v in random.sample(VEHICLES, 4)
-                ],
-                "correct": vehicle,
-                "hint": "Überlege, welches Verkehrsmittel das Emoji zeigt."
-            }
-        )
-
-    # =====================================================
-    # SPORT
-    # =====================================================
-
-    for emoji, sport in SPORTS:
-        quizzes.append(
-            {
-                "question": f"🏆 Welche Sportart wird durch {emoji} dargestellt?",
-                "answers": [
-                    (e, s)
-                    for e, s in random.sample(SPORTS, 4)
-                ],
-                "correct": sport,
-                "hint": "Achte auf das Sportgerät oder die Bewegung."
-            }
-        )
-
-    # =====================================================
-    # NATUR
-    # =====================================================
-
-    for emoji, nature in NATURE:
-        quizzes.append(
-            {
-                "question": f"🌿 Was wird durch {emoji} dargestellt?",
-                "answers": [
-                    (e, n)
-                    for e, n in random.sample(NATURE, 4)
-                ],
-                "correct": nature,
-                "hint": "Überlege, was du normalerweise in der Natur findest."
-            }
-        )
-
-    # =====================================================
-    # TECHNIK
-    # =====================================================
-
-    for emoji, tech in TECH:
-        quizzes.append(
-            {
-                "question": f"💻 Was wird durch {emoji} dargestellt?",
-                "answers": [
-                    (e, t)
-                    for e, t in random.sample(TECH, 4)
-                ],
-                "correct": tech,
-                "hint": "Achte auf das technische Gerät oder Zubehör."
-            }
-        )
-
-    # =====================================================
-    # BERUFE
-    # =====================================================
-
-    for emoji, job in JOBS:
-        quizzes.append(
-            {
-                "question": f"👤 Welcher Beruf wird durch {emoji} dargestellt?",
-                "answers": [
-                    (e, j)
-                    for e, j in random.sample(JOBS, 4)
-                ],
-                "correct": job,
-                "hint": "Überlege, welche Tätigkeit zu der Person passt."
-            }
-        )
-
-    # =====================================================
-    # GEGENSTÄNDE
-    # =====================================================
-
-    for emoji, obj in OBJECTS:
-        quizzes.append(
-            {
-                "question": f"🔎 Was wird durch {emoji} dargestellt?",
-                "answers": [
-                    (e, o)
-                    for e, o in random.sample(OBJECTS, 4)
-                ],
-                "correct": obj,
-                "hint": "Erkenne den Gegenstand anhand seiner Form."
-            }
-        )
-
-    # =====================================================
-    # EMOJI-KOMBINATIONEN
-    # =====================================================
+    # -----------------------------------------------------
+    # Emoji-Kombinationen
+    # -----------------------------------------------------
 
     combination_quizzes = [
         (
             "🇩🇪🍺",
             "Deutschland",
-            ["Deutschland", "Frankreich", "Italien", "Spanien"]
+            [
+                "Deutschland",
+                "Frankreich",
+                "Italien",
+                "Spanien"
+            ]
         ),
         (
             "🇮🇹🍕",
             "Italien",
-            ["Italien", "Japan", "Mexiko", "Griechenland"]
+            [
+                "Italien",
+                "Japan",
+                "Mexiko",
+                "Griechenland"
+            ]
         ),
         (
             "🇯🇵🍣",
             "Japan",
-            ["Japan", "China", "Südkorea", "Thailand"]
+            [
+                "Japan",
+                "China",
+                "Südkorea",
+                "Thailand"
+            ]
         ),
         (
             "🇲🇽🌮",
             "Mexiko",
-            ["Mexiko", "Brasilien", "Spanien", "Portugal"]
+            [
+                "Mexiko",
+                "Brasilien",
+                "Spanien",
+                "Portugal"
+            ]
         ),
         (
             "🇺🇸🍔",
             "USA",
-            ["USA", "Kanada", "Australien", "Mexiko"]
+            [
+                "USA",
+                "Kanada",
+                "Australien",
+                "Mexiko"
+            ]
         ),
         (
             "🇫🇷🥐",
             "Frankreich",
-            ["Frankreich", "Belgien", "Deutschland", "Schweiz"]
+            [
+                "Frankreich",
+                "Belgien",
+                "Deutschland",
+                "Schweiz"
+            ]
         ),
         (
             "🇪🇸💃",
             "Spanien",
-            ["Spanien", "Portugal", "Italien", "Brasilien"]
+            [
+                "Spanien",
+                "Portugal",
+                "Italien",
+                "Brasilien"
+            ]
         ),
         (
             "🇬🇧☕",
             "Vereinigtes Königreich",
-            ["Vereinigtes Königreich", "Irland", "USA", "Kanada"]
+            [
+                "Vereinigtes Königreich",
+                "Irland",
+                "USA",
+                "Kanada"
+            ]
         ),
         (
             "🇦🇺🦘",
             "Australien",
-            ["Australien", "Neuseeland", "Südafrika", "Indonesien"]
+            [
+                "Australien",
+                "Neuseeland",
+                "Südafrika",
+                "Indonesien"
+            ]
         ),
         (
             "🇪🇬🐪",
             "Ägypten",
-            ["Ägypten", "Marokko", "Tunesien", "Saudi-Arabien"]
+            [
+                "Ägypten",
+                "Marokko",
+                "Tunesien",
+                "Saudi-Arabien"
+            ]
+        ),
+        (
+            "🇨🇳🐼",
+            "China",
+            [
+                "China",
+                "Japan",
+                "Südkorea",
+                "Vietnam"
+            ]
+        ),
+        (
+            "🇮🇪🍀",
+            "Irland",
+            [
+                "Irland",
+                "Island",
+                "Schottland",
+                "Kanada"
+            ]
+        ),
+        (
+            "🇬🇷🏛️",
+            "Griechenland",
+            [
+                "Griechenland",
+                "Italien",
+                "Türkei",
+                "Spanien"
+            ]
+        ),
+        (
+            "🇨🇦🍁",
+            "Kanada",
+            [
+                "Kanada",
+                "USA",
+                "Australien",
+                "Neuseeland"
+            ]
         ),
     ]
 
-    for emojis, correct, options in combination_quizzes:
+    for emoji_text, correct, options in combination_quizzes:
+
         answers = []
 
         for country in options:
+
             flag = next(
-                (e for e, c in COUNTRIES if c == country),
+                (
+                    emoji
+                    for emoji, name in COUNTRIES
+                    if name == country
+                ),
                 "🌍"
             )
-            answers.append((flag, country))
+
+            answers.append(
+                (flag, country)
+            )
 
         quizzes.append(
             {
-                "question": f"🧩 Welche Verbindung passt am besten zu {emojis}?",
+                "question": (
+                    f"🧩 Welche Verbindung passt "
+                    f"am besten zu:\n\n"
+                    f"**{emoji_text}**"
+                ),
                 "answers": answers,
                 "correct": correct,
-                "hint": "Die Emojis geben dir einen Hinweis auf das gesuchte Land."
+                "hint": (
+                    "Die Emojis geben dir gemeinsam "
+                    "einen Hinweis auf das gesuchte Land."
+                )
             }
         )
 
-    # =====================================================
-    # ZAHLEN / EMOJI-RECHNEN
-    # =====================================================
+    # -----------------------------------------------------
+    # Rechenfragen
+    # -----------------------------------------------------
 
     math_quizzes = [
         ("🍎 + 🍎", "2", ["1", "2", "3", "4"]),
@@ -764,26 +1012,40 @@ def build_quizzes():
         ("🚗🚗 - 🚗", "1", ["0", "1", "2", "3"]),
         ("⚽⚽⚽⚽ - ⚽⚽", "2", ["1", "2", "3", "4"]),
         ("🍎🍎🍎 + 🍎🍎", "5", ["3", "4", "5", "6"]),
-        ("⭐ × ⭐⭐⭐", "3", ["2", "3", "4", "6"]),
+        ("⭐ + ⭐⭐", "3", ["2", "3", "4", "5"]),
         ("🐱🐱🐱🐱 ÷ 🐱🐱", "2", ["1", "2", "3", "4"]),
+        ("🍕🍕 + 🍕🍕🍕", "5", ["3", "4", "5", "6"]),
+        ("⭐⭐⭐⭐ - ⭐", "3", ["2", "3", "4", "5"]),
+        ("🐶🐶 + 🐱🐱", "4", ["2", "3", "4", "5"]),
+        ("🍎🍎🍎🍎 - 🍎🍎", "2", ["1", "2", "3", "4"]),
     ]
 
     for expression, correct, options in math_quizzes:
+
+        answers = [
+            ("🔢", option)
+            for option in options
+        ]
+
         quizzes.append(
             {
-                "question": f"🔢 Wie viele Symbole ergeben zusammen: {expression}?",
-                "answers": [
-                    ("🔢", option)
-                    for option in options
-                ],
+                "question": (
+                    "🔢 **Emoji-Rechnen**\n\n"
+                    f"Wie viel ergibt:\n"
+                    f"**{expression}**"
+                ),
+                "answers": answers,
                 "correct": correct,
-                "hint": "Zähle die Emojis und rechne Schritt für Schritt."
+                "hint": (
+                    "Zähle die Symbole und rechne "
+                    "Schritt für Schritt."
+                )
             }
         )
 
-    # =====================================================
-    # EMOJI-RÄTSEL
-    # =====================================================
+    # -----------------------------------------------------
+    # Rätsel
+    # -----------------------------------------------------
 
     riddles = [
         ("🌧️☂️", "Regen"),
@@ -796,16 +1058,20 @@ def build_quizzes():
         ("🍕🍝🇮🇹", "Italien"),
         ("🍣🍚🇯🇵", "Japan"),
         ("🌮🌯🇲🇽", "Mexiko"),
-        ("🥨🍺🇩🇪", "Deutschland"),
+        ("🥨🇩🇪", "Deutschland"),
         ("🥐🗼🇫🇷", "Frankreich"),
         ("🦘🇦🇺", "Australien"),
         ("🍀🇮🇪", "Irland"),
-        ("🗼🇫🇷", "Frankreich"),
         ("🗽🇺🇸", "USA"),
-        ("🏰🇩🇪", "Deutschland"),
         ("🐼🇨🇳", "China"),
         ("🦁🇿🇦", "Südafrika"),
         ("🐪🏜️", "Wüste"),
+        ("🌊🏖️", "Strand"),
+        ("🌋🔥", "Vulkan"),
+        ("🌈☀️🌧️", "Regenbogen"),
+        ("🌙🛏️", "Nacht"),
+        ("🎄🎁", "Weihnachten"),
+        ("🎃👻", "Halloween"),
     ]
 
     riddle_options = [
@@ -827,39 +1093,56 @@ def build_quizzes():
         "Morgen",
         "Wüste",
         "Südafrika",
+        "Strand",
+        "Vulkan",
+        "Regenbogen",
+        "Weihnachten",
+        "Halloween",
     ]
 
     for emoji_text, correct in riddles:
+
         available = [
-            x for x in riddle_options
-            if x != correct
+            answer
+            for answer in riddle_options
+            if answer != correct
         ]
 
         selected = random.sample(
             available,
-            min(3, len(available))
+            3
         )
 
         answers = [
-            ("❓", x)
-            for x in selected
+            ("❓", answer)
+            for answer in selected
         ]
 
-        answers.append(("✅", correct))
+        answers.append(
+            ("✅", correct)
+        )
+
         random.shuffle(answers)
 
         quizzes.append(
             {
-                "question": f"🧠 Was könnten diese Emojis bedeuten?\n\n{emoji_text}",
+                "question": (
+                    "🧩 **Emoji-Rätsel**\n\n"
+                    f"{emoji_text}\n\n"
+                    "Was könnten diese Emojis bedeuten?"
+                ),
                 "answers": answers,
                 "correct": correct,
-                "hint": "Versuche die einzelnen Emojis als gemeinsamen Hinweis zu verstehen."
+                "hint": (
+                    "Versuche die Emojis als "
+                    "gemeinsamen Hinweis zu verstehen."
+                )
             }
         )
 
-    # =====================================================
-    # ALLTAG
-    # =====================================================
+    # -----------------------------------------------------
+    # Alltag
+    # -----------------------------------------------------
 
     everyday = [
         ("🛏️", "Schlafen"),
@@ -878,6 +1161,10 @@ def build_quizzes():
         ("⚽🏟️", "Fußballspiel"),
         ("✈️🧳", "Reise"),
         ("🚗⛽", "Tanken"),
+        ("🧹🏠", "Putzen"),
+        ("🍽️🧼", "Abwaschen"),
+        ("📱⏰", "Wecker"),
+        ("🛒🥦", "Einkaufen"),
     ]
 
     everyday_options = [
@@ -897,91 +1184,73 @@ def build_quizzes():
         "Fußballspiel",
         "Reise",
         "Tanken",
+        "Putzen",
+        "Abwaschen",
+        "Wecker",
     ]
 
     for emoji_text, correct in everyday:
+
         others = [
-            x for x in everyday_options
-            if x != correct
+            answer
+            for answer in everyday_options
+            if answer != correct
         ]
 
-        selected = random.sample(others, 3)
+        selected = random.sample(
+            others,
+            3
+        )
 
         answers = [
-            ("❓", x)
-            for x in selected
+            ("❓", answer)
+            for answer in selected
         ]
 
-        answers.append(("✅", correct))
+        answers.append(
+            ("✅", correct)
+        )
+
         random.shuffle(answers)
 
         quizzes.append(
             {
-                "question": f"🏠 Was beschreibt diese Emoji-Kombination?\n\n{emoji_text}",
+                "question": (
+                    "🏠 **Alltagsrätsel**\n\n"
+                    f"{emoji_text}\n\n"
+                    "Was beschreibt diese Kombination?"
+                ),
                 "answers": answers,
                 "correct": correct,
-                "hint": "Überlege, welche gemeinsame Handlung oder Situation die Emojis darstellen."
+                "hint": (
+                    "Überlege, welche Handlung oder "
+                    "Situation dargestellt wird."
+                )
             }
         )
 
-    # =====================================================
-    # MEHRFACH-VARIATIONEN
-    # =====================================================
+    # -----------------------------------------------------
+    # Finale Bereinigung
+    # -----------------------------------------------------
 
-    # Dadurch entstehen zusätzliche Fragen zu den gleichen
-    # Themen, aber mit anderer Fragestellung und Antwortlage.
+    valid_quizzes = []
 
-    question_templates = [
-        "🔎 Welches Emoji passt zu **{answer}**?",
-        "🧠 Welches Symbol steht für **{answer}**?",
-        "🎯 Welches Emoji beschreibt **{answer}**?",
-        "❓ Welches dieser Emojis gehört zu **{answer}**?",
-    ]
+    for quiz in quizzes:
 
-    all_categories = [
-        COUNTRIES,
-        COLORS,
-        ANIMALS,
-        FOOD,
-        DRINKS,
-        VEHICLES,
-        SPORTS,
-        NATURE,
-        TECH,
-        JOBS,
-        OBJECTS,
-    ]
+        if (
+            quiz
+            and len(quiz.get("answers", [])) == 4
+            and quiz.get("correct")
+            and quiz["correct"] in [
+                answer
+                for _, answer in quiz["answers"]
+            ]
+        ):
+            valid_quizzes.append(quiz)
 
-    for category in all_categories:
+    random.shuffle(valid_quizzes)
 
-        for emoji, answer in category:
-
-            for template in question_templates:
-
-                wrong = [
-                    item
-                    for item in category
-                    if item[1] != answer
-                ]
-
-                if len(wrong) < 3:
-                    continue
-
-                selected_wrong = random.sample(wrong, 3)
-
-                choices = selected_wrong + [(emoji, answer)]
-                random.shuffle(choices)
-
-                quizzes.append(
-                    {
-                        "question": template.format(answer=answer),
-                        "answers": choices,
-                        "correct": answer,
-                        "hint": "Vergleiche die vier Emojis und suche das Symbol, das wirklich passt."
-                    }
-                )
-
-    return quizzes
+    return valid_quizzes
 
 
 QUIZZES = build_quizzes()
@@ -992,21 +1261,32 @@ QUIZZES = build_quizzes()
 # =========================================================
 
 def refill_quiz_bag():
+
     global quiz_bag
 
-    quiz_bag = list(range(len(QUIZZES)))
-    random.shuffle(quiz_bag)
+    quiz_bag = list(
+        range(len(QUIZZES))
+    )
 
-    print(f"[QUIZ] Neuer Fragen-Pool: {len(quiz_bag)} Fragen")
+    random.shuffle(
+        quiz_bag
+    )
+
+    print(
+        f"[QUIZ] Neuer Fragen-Pool: "
+        f"{len(quiz_bag)} Fragen"
+    )
 
 
 def get_next_quiz():
+
     global quiz_bag
 
     if not quiz_bag:
         refill_quiz_bag()
 
     index = quiz_bag.pop()
+
     return QUIZZES[index]
 
 
@@ -1015,37 +1295,51 @@ def get_next_quiz():
 # =========================================================
 
 def create_quiz_embed(quiz):
+
     embed = discord.Embed(
-        title="🧠 Emoji Quiz",
+        title="🧠  EMOJI QUIZ",
         description=(
-            f"### {quiz['question']}\n\n"
-            "Wähle die richtige Antwort:"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"### {quiz['question']}\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🎯 **Wähle die richtige Antwort!**\n"
+            "💡 Du kannst jederzeit einen Hinweis anfordern."
         ),
         color=discord.Color.blurple(),
-        timestamp=datetime.utcnow()
+        timestamp=now_utc()
     )
 
-    for emoji, answer in quiz["answers"]:
+    for position, (emoji, answer) in enumerate(
+        quiz["answers"],
+        start=1
+    ):
+
         embed.add_field(
-            name=f"{emoji} {answer}",
-            value="\u200b",
+            name=f"{position}. {emoji} {answer}",
+            value="Klicke auf den passenden Button 👇",
             inline=True
         )
 
     embed.set_footer(
-        text="💡 Nutze den Hinweis, wenn du nicht weiterkommst."
+        text="🏆 Für jede richtige Antwort erhältst du 1 Punkt."
     )
 
     return embed
 
 
 # =========================================================
-# QUIZ BUTTONS
+# QUIZ BUTTON – ANTWORT
 # =========================================================
 
 class QuizAnswerButton(discord.ui.Button):
 
-    def __init__(self, position, emoji, label):
+    def __init__(
+        self,
+        position,
+        emoji,
+        label
+    ):
+
         super().__init__(
             style=discord.ButtonStyle.secondary,
             emoji=emoji,
@@ -1055,72 +1349,113 @@ class QuizAnswerButton(discord.ui.Button):
 
         self.position = position
 
-    async def callback(self, interaction: discord.Interaction):
+    async def callback(
+        self,
+        interaction: discord.Interaction
+    ):
 
         global current_quiz
         global current_quiz_message
 
-        if current_quiz is None:
-            await interaction.response.send_message(
-                "❌ Dieses Quiz ist nicht mehr aktiv.",
-                ephemeral=True
-            )
-            return
+        async with quiz_answer_lock:
 
-        if interaction.message.id != getattr(
-            current_quiz_message,
-            "id",
-            None
-        ):
-            await interaction.response.send_message(
-                "❌ Dieses Quiz ist nicht mehr aktiv.",
-                ephemeral=True
-            )
-            return
+            if current_quiz is None:
 
-        answer = current_quiz["answers"][self.position][1]
+                await interaction.response.send_message(
+                    "❌ Dieses Quiz ist bereits beendet.",
+                    ephemeral=True
+                )
 
-        if answer == current_quiz["correct"]:
+                return
 
-            user_id = str(interaction.user.id)
+            if interaction.message.id != getattr(
+                current_quiz_message,
+                "id",
+                None
+            ):
 
-            quiz_scores[user_id] = (
-                quiz_scores.get(user_id, 0) + 1
-            )
+                await interaction.response.send_message(
+                    "❌ Dieses Quiz ist nicht mehr aktiv.",
+                    ephemeral=True
+                )
 
-            save_data()
+                return
 
-            await interaction.response.send_message(
-                f"✅ Richtig! **+1 Punkt**\n"
-                f"🏆 Du hast jetzt **{quiz_scores[user_id]} Punkte**.",
-                ephemeral=True
-            )
+            answer = current_quiz[
+                "answers"
+            ][self.position][1]
 
-            channel = interaction.channel
+            # ---------------------------------------------
+            # RICHTIG
+            # ---------------------------------------------
 
-            old_message = current_quiz_message
+            if answer == current_quiz["correct"]:
 
-            current_quiz = None
-            current_quiz_message = None
+                user_id = str(
+                    interaction.user.id
+                )
 
-            await safe_delete(old_message)
+                quiz_scores[user_id] = (
+                    quiz_scores.get(
+                        user_id,
+                        0
+                    ) + 1
+                )
 
-            await asyncio.sleep(1)
+                save_data()
 
-            if channel:
-                await send_new_quiz(channel)
+                score = quiz_scores[user_id]
 
-        else:
+                old_message = current_quiz_message
+                channel = interaction.channel
 
-            await interaction.response.send_message(
-                "❌ Leider falsch! Versuch es weiter. 😄",
-                ephemeral=True
-            )
+                current_quiz = None
+                current_quiz_message = None
 
+                await interaction.response.send_message(
+                    (
+                        "🎉 **RICHTIG!**\n\n"
+                        "🏆 **+1 Punkt**\n"
+                        f"📊 Dein Punktestand: **{score} Punkte**"
+                    ),
+                    ephemeral=True
+                )
+
+                await safe_delete(
+                    old_message
+                )
+
+                await asyncio.sleep(1)
+
+                if channel:
+
+                    await send_new_quiz(
+                        channel
+                    )
+
+            # ---------------------------------------------
+            # FALSCH
+            # ---------------------------------------------
+
+            else:
+
+                await interaction.response.send_message(
+                    (
+                        "❌ **Leider falsch!**\n"
+                        "😄 Versuch es weiter!"
+                    ),
+                    ephemeral=True
+                )
+
+
+# =========================================================
+# QUIZ BUTTON – HINWEIS
+# =========================================================
 
 class QuizHintButton(discord.ui.Button):
 
     def __init__(self):
+
         super().__init__(
             style=discord.ButtonStyle.primary,
             emoji="💡",
@@ -1128,24 +1463,37 @@ class QuizHintButton(discord.ui.Button):
             custom_id="quiz_hint_button"
         )
 
-    async def callback(self, interaction: discord.Interaction):
+    async def callback(
+        self,
+        interaction: discord.Interaction
+    ):
 
         if current_quiz is None:
+
             await interaction.response.send_message(
-                "❌ Kein aktives Quiz.",
+                "❌ Aktuell ist kein Quiz aktiv.",
                 ephemeral=True
             )
+
             return
 
         await interaction.response.send_message(
-            f"💡 **Hinweis:**\n{current_quiz['hint']}",
+            (
+                "💡 **Hinweis**\n\n"
+                f"{current_quiz['hint']}"
+            ),
             ephemeral=True
         )
 
 
+# =========================================================
+# QUIZ BUTTON – ÜBERSPRINGEN
+# =========================================================
+
 class QuizSkipButton(discord.ui.Button):
 
     def __init__(self):
+
         super().__init__(
             style=discord.ButtonStyle.danger,
             emoji="⏭️",
@@ -1153,47 +1501,86 @@ class QuizSkipButton(discord.ui.Button):
             custom_id="quiz_skip_button"
         )
 
-    async def callback(self, interaction: discord.Interaction):
+    async def callback(
+        self,
+        interaction: discord.Interaction
+    ):
 
         global current_quiz
         global current_quiz_message
 
-        if current_quiz is None:
+        async with quiz_answer_lock:
+
+            if current_quiz is None:
+
+                await interaction.response.send_message(
+                    "❌ Aktuell ist kein Quiz aktiv.",
+                    ephemeral=True
+                )
+
+                return
+
+            if interaction.message.id != getattr(
+                current_quiz_message,
+                "id",
+                None
+            ):
+
+                await interaction.response.send_message(
+                    "❌ Dieses Quiz ist nicht mehr aktiv.",
+                    ephemeral=True
+                )
+
+                return
+
+            channel = interaction.channel
+            old_message = current_quiz_message
+
+            current_quiz = None
+            current_quiz_message = None
+
             await interaction.response.send_message(
-                "❌ Kein aktives Quiz.",
+                "⏭️ **Quiz übersprungen!**",
                 ephemeral=True
             )
-            return
 
-        channel = interaction.channel
-        old_message = current_quiz_message
+            await safe_delete(
+                old_message
+            )
 
-        current_quiz = None
-        current_quiz_message = None
+            await asyncio.sleep(1)
 
-        await interaction.response.send_message(
-            "⏭️ Quiz übersprungen!",
-            ephemeral=True
-        )
+            if channel:
 
-        await safe_delete(old_message)
+                await send_new_quiz(
+                    channel
+                )
 
-        await asyncio.sleep(1)
 
-        if channel:
-            await send_new_quiz(channel)
-
+# =========================================================
+# QUIZ VIEW
+# =========================================================
 
 class QuizView(discord.ui.View):
 
-    def __init__(self, quiz=None):
-        super().__init__(timeout=None)
+    def __init__(
+        self,
+        quiz=None
+    ):
+
+        super().__init__(
+            timeout=None
+        )
 
         if quiz is not None:
 
-            for position, (emoji, label) in enumerate(
+            for position, (
+                emoji,
+                label
+            ) in enumerate(
                 quiz["answers"]
             ):
+
                 self.add_item(
                     QuizAnswerButton(
                         position,
@@ -1202,8 +1589,13 @@ class QuizView(discord.ui.View):
                     )
                 )
 
-        self.add_item(QuizHintButton())
-        self.add_item(QuizSkipButton())
+        self.add_item(
+            QuizHintButton()
+        )
+
+        self.add_item(
+            QuizSkipButton()
+        )
 
 
 # =========================================================
@@ -1215,17 +1607,25 @@ async def send_new_quiz(channel):
     global current_quiz
     global current_quiz_message
 
+    if channel is None:
+        return
+
     async with quiz_lock:
 
         quiz = get_next_quiz()
 
         current_quiz = quiz
 
-        embed = create_quiz_embed(quiz)
+        embed = create_quiz_embed(
+            quiz
+        )
 
-        view = QuizView(quiz)
+        view = QuizView(
+            quiz
+        )
 
         try:
+
             message = await channel.send(
                 embed=embed,
                 view=view
@@ -1233,22 +1633,99 @@ async def send_new_quiz(channel):
 
             current_quiz_message = message
 
-        except Exception as e:
-            print(f"[QUIZ] Fehler beim Senden: {e}")
+        except discord.Forbidden:
+
+            print(
+                "[QUIZ] Keine Berechtigung, "
+                "im Quiz-Kanal zu senden."
+            )
+
+            current_quiz = None
+            current_quiz_message = None
+
+        except discord.HTTPException as error:
+
+            print(
+                f"[QUIZ] Discord-Fehler: {error}"
+            )
+
+            current_quiz = None
+            current_quiz_message = None
+
+
+# =========================================================
+# BOT KLASSE
+# =========================================================
+
+class RLPBot(commands.Bot):
+
+    async def setup_hook(self):
+
+        print(
+            "[BOT] Lade gespeicherte Daten..."
+        )
+
+        load_data()
+
+        # Persistent Nickname Panel
+        self.add_view(
+            NicknamePanelView()
+        )
+
+        # Persistent Developer Panel
+        self.add_view(
+            DeveloperApplicationView()
+        )
+
+        print(
+            "[BOT] Persistent Views geladen."
+        )
+
+
+# =========================================================
+# BOT ERSTELLEN
+# =========================================================
+
+bot = RLPBot(
+    command_prefix="!",
+    intents=intents,
+    help_command=None
+)
 
 
 # =========================================================
 # QUIZ COMMANDS
 # =========================================================
 
-@bot.command(name="quiz")
-@commands.has_permissions(manage_messages=True)
+@bot.command(
+    name="quiz"
+)
+@commands.has_permissions(
+    manage_messages=True
+)
 async def quiz_command(ctx):
 
-    await send_new_quiz(ctx.channel)
+    embed = discord.Embed(
+        title="🧠 Neues Emoji Quiz",
+        description=(
+            "🎯 Ein neues Quiz wurde gestartet!\n\n"
+            "Viel Erfolg an alle Teilnehmer. 🍀"
+        ),
+        color=discord.Color.blurple()
+    )
+
+    await ctx.send(
+        embed=embed
+    )
+
+    await send_new_quiz(
+        ctx.channel
+    )
 
 
-@bot.command(name="punkte")
+@bot.command(
+    name="punkte"
+)
 async def points_command(ctx):
 
     points = quiz_scores.get(
@@ -1256,46 +1733,174 @@ async def points_command(ctx):
         0
     )
 
+    embed = discord.Embed(
+        title="🏆 Dein Quiz-Punktestand",
+        description=(
+            f"👤 Spieler: {ctx.author.mention}\n\n"
+            f"⭐ Punkte: **{points}**"
+        ),
+        color=discord.Color.gold()
+    )
+
+    embed.set_footer(
+        text="🧠 Spiele weiter, um mehr Punkte zu sammeln!"
+    )
+
     await ctx.send(
-        f"🏆 {ctx.author.mention}, du hast "
-        f"**{points} Punkte**."
+        embed=embed
     )
 
 
-@bot.command(name="top")
+@bot.command(
+    name="top"
+)
 async def top_command(ctx):
 
     if not quiz_scores:
-        await ctx.send(
-            "🏆 Noch niemand hat Punkte gesammelt."
+
+        embed = discord.Embed(
+            title="🏆 Emoji Quiz Rangliste",
+            description=(
+                "📭 Aktuell hat noch niemand "
+                "Punkte gesammelt."
+            ),
+            color=discord.Color.gold()
         )
+
+        await ctx.send(
+            embed=embed
+        )
+
         return
 
     sorted_scores = sorted(
         quiz_scores.items(),
-        key=lambda x: x[1],
+        key=lambda item: item[1],
         reverse=True
     )[:10]
 
-    text = "🏆 **Emoji-Quiz Rangliste**\n\n"
+    lines = []
 
-    for position, (user_id, score) in enumerate(
+    medals = [
+        "🥇",
+        "🥈",
+        "🥉"
+    ]
+
+    for position, (
+        user_id,
+        score
+    ) in enumerate(
         sorted_scores,
         start=1
     ):
-        user = ctx.guild.get_member(int(user_id))
 
-        if user:
-            name = user.display_name
+        try:
+
+            member = ctx.guild.get_member(
+                int(user_id)
+            )
+
+        except ValueError:
+
+            member = None
+
+        if member:
+
+            name = member.display_name
+
         else:
+
             name = f"User {user_id}"
 
-        text += (
-            f"**{position}.** {name} — "
-            f"**{score} Punkte**\n"
+        if position <= 3:
+
+            prefix = medals[
+                position - 1
+            ]
+
+        else:
+
+            prefix = f"**{position}.**"
+
+        lines.append(
+            f"{prefix} **{name}** — ⭐ **{score} Punkte**"
         )
 
-    await ctx.send(text)
+    embed = discord.Embed(
+        title="🏆 Emoji Quiz Rangliste",
+        description=(
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            + "\n".join(lines)
+            + "\n━━━━━━━━━━━━━━━━━━━━"
+        ),
+        color=discord.Color.gold()
+    )
+
+    embed.set_footer(
+        text="🎯 Die Rangliste zeigt die besten 10 Spieler."
+    )
+
+    await ctx.send(
+        embed=embed
+    )
+
+
+# =========================================================
+# HELP COMMAND
+# =========================================================
+
+@bot.command(
+    name="help"
+)
+async def help_command(ctx):
+
+    embed = discord.Embed(
+        title="📚 RLP Bot – Hilfe",
+        description=(
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Hier findest du alle verfügbaren Befehle.\n"
+            "━━━━━━━━━━━━━━━━━━━━"
+        ),
+        color=discord.Color.blurple()
+    )
+
+    embed.add_field(
+        name="🧠 Quiz",
+        value=(
+            "`!quiz` — Neues Quiz starten\n"
+            "`!punkte` — Eigenen Punktestand anzeigen\n"
+            "`!top` — Top 10 anzeigen"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🏷️ Nametag",
+        value=(
+            "Dein **RLP** wird automatisch vor deinen "
+            "Namen gesetzt, wenn du die entsprechende "
+            "Rolle besitzt."
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🛠️ Developer",
+        value=(
+            "Die Bewerbung wird über das "
+            "Developer-Panel gestartet."
+        ),
+        inline=False
+    )
+
+    embed.set_footer(
+        text="🤖 RLP Bot"
+    )
+
+    await ctx.send(
+        embed=embed
+    )
 
 
 # =========================================================
@@ -1306,13 +1911,41 @@ def get_clean_name(member):
 
     name = member.nick or member.name
 
-    while name.startswith(NAMETAG):
-        name = name[len(NAMETAG):]
+    while name.startswith(
+        NAMETAG
+    ):
+
+        name = name[
+            len(NAMETAG):
+        ]
 
     return name.strip()
 
 
-async def set_rlp_nickname(member, force=False):
+def create_rlp_nickname(member):
+
+    clean_name = get_clean_name(
+        member
+    )
+
+    available_length = (
+        MAX_NICKNAME_LENGTH
+        - len(NAMETAG)
+    )
+
+    clean_name = clean_name[
+        :available_length
+    ]
+
+    return (
+        f"{NAMETAG}{clean_name}"
+    )
+
+
+async def set_rlp_nickname(
+    member,
+    force=False
+):
 
     if member.bot:
         return
@@ -1320,7 +1953,9 @@ async def set_rlp_nickname(member, force=False):
     if member.guild.id != GUILD_ID:
         return
 
-    role = member.guild.get_role(NAMETAG_ROLE_ID)
+    role = member.guild.get_role(
+        NAMETAG_ROLE_ID
+    )
 
     if role is None:
         return
@@ -1328,99 +1963,164 @@ async def set_rlp_nickname(member, force=False):
     if role not in member.roles:
         return
 
-    user_id = str(member.id)
+    user_id = str(
+        member.id
+    )
 
+    # Benutzer hat RLP bewusst entfernt
     if (
         user_id in nametag_removed_users
         and not force
     ):
         return
 
+    # Bei erneuter Vergabe der Rolle
+    # wird die Ausnahme gelöscht.
     if force:
-        nametag_removed_users.discard(user_id)
+
+        nametag_removed_users.discard(
+            user_id
+        )
+
         save_data()
 
-    clean_name = get_clean_name(member)
-
-    nickname = f"{NAMETAG}{clean_name}"
-
-    nickname = nickname[:32]
+    nickname = create_rlp_nickname(
+        member
+    )
 
     if member.nick == nickname:
         return
 
     try:
+
         await member.edit(
             nick=nickname,
-            reason="RLP Nametag"
+            reason="RLP Nametag automatisch gesetzt"
+        )
+
+        print(
+            f"[RLP] Nametag gesetzt: "
+            f"{member} -> {nickname}"
         )
 
     except discord.Forbidden:
+
         print(
             f"[RLP] Keine Berechtigung für {member}"
         )
 
-    except discord.HTTPException as e:
+    except discord.HTTPException as error:
+
         print(
-            f"[RLP] Discord Fehler bei {member}: {e}"
+            f"[RLP] Discord-Fehler bei {member}: "
+            f"{error}"
         )
 
 
 async def remove_rlp_nickname(member):
 
-    user_id = str(member.id)
+    user_id = str(
+        member.id
+    )
 
-    clean_name = get_clean_name(member)
+    clean_name = get_clean_name(
+        member
+    )
 
     try:
+
         await member.edit(
             nick=clean_name[:32],
             reason="RLP vom Benutzer entfernt"
         )
 
-        nametag_removed_users.add(user_id)
+        nametag_removed_users.add(
+            user_id
+        )
+
         save_data()
+
+        print(
+            f"[RLP] RLP entfernt: {member}"
+        )
 
         return True
 
     except discord.Forbidden:
+
+        print(
+            f"[RLP] Keine Berechtigung für {member}"
+        )
+
         return False
 
-    except discord.HTTPException:
+    except discord.HTTPException as error:
+
+        print(
+            f"[RLP] Fehler beim Entfernen: {error}"
+        )
+
         return False
 
 
 async def update_all_rlp_nicknames():
 
-    guild = bot.get_guild(GUILD_ID)
+    guild = bot.get_guild(
+        GUILD_ID
+    )
 
     if guild is None:
+
+        print(
+            "[RLP] Server nicht gefunden."
+        )
+
         return
 
-    role = guild.get_role(NAMETAG_ROLE_ID)
+    role = guild.get_role(
+        NAMETAG_ROLE_ID
+    )
 
     if role is None:
-        print("[RLP] Rolle nicht gefunden.")
+
+        print(
+            "[RLP] RLP-Rolle nicht gefunden."
+        )
+
         return
 
     print(
-        f"[RLP] Aktualisiere {len(role.members)} Mitglieder..."
+        f"[RLP] Prüfe {len(role.members)} Mitglieder..."
     )
 
     for member in role.members:
-        await set_rlp_nickname(member)
 
-    print("[RLP] Nametags aktualisiert.")
+        await set_rlp_nickname(
+            member
+        )
+
+        await asyncio.sleep(
+            0.15
+        )
+
+    print(
+        "[RLP] Nametags aktualisiert."
+    )
 
 
 # =========================================================
 # NAMETAG PANEL
 # =========================================================
 
-class NicknamePanelView(discord.ui.View):
+class NicknamePanelView(
+    discord.ui.View
+):
 
     def __init__(self):
-        super().__init__(timeout=None)
+
+        super().__init__(
+            timeout=None
+        )
 
     @discord.ui.button(
         label="RLP entfernen",
@@ -1434,44 +2134,87 @@ class NicknamePanelView(discord.ui.View):
         button: discord.ui.Button
     ):
 
+        if interaction.guild is None:
+
+            await interaction.response.send_message(
+                "❌ Dieser Button funktioniert nur auf dem Server.",
+                ephemeral=True
+            )
+
+            return
+
         member = interaction.guild.get_member(
             interaction.user.id
         )
 
         if member is None:
+
             await interaction.response.send_message(
-                "❌ Mitglied nicht gefunden.",
+                "❌ Mitglied konnte nicht gefunden werden.",
                 ephemeral=True
             )
+
             return
 
         role = interaction.guild.get_role(
             NAMETAG_ROLE_ID
         )
 
-        if role is None or role not in member.roles:
+        if (
+            role is None
+            or role not in member.roles
+        ):
+
             await interaction.response.send_message(
-                "❌ Du hast die RLP-Rolle nicht.",
+                (
+                    "❌ Du besitzt die erforderliche "
+                    "RLP-Rolle nicht."
+                ),
                 ephemeral=True
             )
+
             return
 
-        success = await remove_rlp_nickname(member)
+        success = await remove_rlp_nickname(
+            member
+        )
 
         if success:
 
+            embed = discord.Embed(
+                title="✅ RLP entfernt",
+                description=(
+                    "Dein RLP-Nametag wurde erfolgreich entfernt.\n\n"
+                    "🏷️ Dein Name bleibt ohne `RLP `.\n"
+                    "🔄 Diese Einstellung bleibt auch nach "
+                    "einem Bot-Neustart bestehen.\n\n"
+                    "♻️ Wenn dir die RLP-Rolle später erneut "
+                    "gegeben wird, wird `RLP ` wieder automatisch "
+                    "hinzugefügt."
+                ),
+                color=discord.Color.green()
+            )
+
             await interaction.response.send_message(
-                "✅ Dein RLP wurde entfernt.\n"
-                "Dein Name bleibt auch nach einem Bot-Neustart "
-                "ohne RLP.",
+                embed=embed,
                 ephemeral=True
             )
 
         else:
 
+            embed = discord.Embed(
+                title="❌ Änderung fehlgeschlagen",
+                description=(
+                    "Ich konnte deinen Nicknamen nicht ändern.\n\n"
+                    "Bitte stelle sicher, dass der Bot die "
+                    "Berechtigung **Nicknames verwalten** besitzt "
+                    "und seine Rolle über deiner Rolle steht."
+                ),
+                color=discord.Color.red()
+            )
+
             await interaction.response.send_message(
-                "❌ Ich konnte deinen Nicknamen nicht ändern. "
-                "Bitte prüfe die Bot-Berechtigungen.",
+                embed=embed,
                 ephemeral=True
             )
 
@@ -1493,13 +2236,15 @@ DEVELOPER_QUESTIONS = [
 ]
 
 
-active_applications = set()
-
-
-class DeveloperApplicationView(discord.ui.View):
+class DeveloperApplicationView(
+    discord.ui.View
+):
 
     def __init__(self):
-        super().__init__(timeout=None)
+
+        super().__init__(
+            timeout=None
+        )
 
     @discord.ui.button(
         label="Developer bewerben",
@@ -1516,17 +2261,34 @@ class DeveloperApplicationView(discord.ui.View):
         user_id = interaction.user.id
 
         if user_id in active_applications:
+
             await interaction.response.send_message(
-                "❌ Du hast bereits eine laufende Bewerbung.",
+                (
+                    "⏳ Du hast bereits eine laufende "
+                    "Developer-Bewerbung."
+                ),
                 ephemeral=True
             )
+
             return
 
-        active_applications.add(user_id)
+        active_applications.add(
+            user_id
+        )
+
+        embed = discord.Embed(
+            title="📩 Bewerbung gestartet",
+            description=(
+                "Deine Developer-Bewerbung wurde gestartet.\n\n"
+                "📬 Ich habe dir eine **DM** geschickt.\n"
+                "📝 Beantworte dort die Fragen nacheinander.\n"
+                "⏱️ Für jede Frage hast du **5 Minuten** Zeit."
+            ),
+            color=discord.Color.green()
+        )
 
         await interaction.response.send_message(
-            "📩 Ich habe dir eine DM geschickt. "
-            "Beantworte dort die Fragen.",
+            embed=embed,
             ephemeral=True
         )
 
@@ -1537,14 +2299,24 @@ class DeveloperApplicationView(discord.ui.View):
         )
 
 
-async def run_developer_application(user):
+async def run_developer_application(
+    user
+):
 
     try:
 
         await user.send(
-            "🛠️ **Developer Bewerbung**\n\n"
-            "Wir starten jetzt deine Bewerbung.\n"
-            "Bitte beantworte jede Frage einzeln."
+            embed=discord.Embed(
+                title="🛠️ Developer Bewerbung",
+                description=(
+                    "Willkommen bei deiner Developer-Bewerbung!\n\n"
+                    f"Ich stelle dir insgesamt "
+                    f"**{len(DEVELOPER_QUESTIONS)} Fragen**.\n\n"
+                    "📝 Bitte beantworte jede Frage einzeln.\n"
+                    "⏱️ Für jede Frage hast du 5 Minuten Zeit."
+                ),
+                color=discord.Color.blurple()
+            )
         )
 
         answers = []
@@ -1554,12 +2326,25 @@ async def run_developer_application(user):
             start=1
         ):
 
+            embed = discord.Embed(
+                title=(
+                    f"📝 Frage {number}/"
+                    f"{len(DEVELOPER_QUESTIONS)}"
+                ),
+                description=question,
+                color=discord.Color.blurple()
+            )
+
+            embed.set_footer(
+                text="⏱️ Du hast 5 Minuten Zeit zu antworten."
+            )
+
             await user.send(
-                f"**Frage {number}/{len(DEVELOPER_QUESTIONS)}**\n"
-                f"{question}"
+                embed=embed
             )
 
             def check(message):
+
                 return (
                     message.author.id == user.id
                     and isinstance(
@@ -1579,17 +2364,36 @@ async def run_developer_application(user):
             except asyncio.TimeoutError:
 
                 await user.send(
-                    "⏰ Bewerbung abgebrochen, "
-                    "weil du zu lange nicht geantwortet hast."
+                    embed=discord.Embed(
+                        title="⏰ Bewerbung abgebrochen",
+                        description=(
+                            "Du hast zu lange nicht geantwortet.\n\n"
+                            "Wenn du dich erneut bewerben möchtest, "
+                            "kannst du den Button im Developer-Panel "
+                            "erneut verwenden."
+                        ),
+                        color=discord.Color.orange()
+                    )
                 )
 
                 return
 
-            answers.append(message.content)
+            answers.append(
+                message.content
+            )
 
         await user.send(
-            "✅ Deine Bewerbung wurde vollständig "
-            "aufgenommen und an das Team weitergeleitet."
+            embed=discord.Embed(
+                title="✅ Bewerbung abgeschickt",
+                description=(
+                    "Vielen Dank!\n\n"
+                    "Deine Developer-Bewerbung wurde "
+                    "vollständig aufgenommen und an das "
+                    "Team weitergeleitet. 📬\n\n"
+                    "Das Team wird deine Bewerbung prüfen."
+                ),
+                color=discord.Color.green()
+            )
         )
 
         await send_application_review(
@@ -1603,24 +2407,46 @@ async def run_developer_application(user):
             f"[APPLICATION] Keine DM-Berechtigung für {user}"
         )
 
+    except discord.HTTPException as error:
+
+        print(
+            f"[APPLICATION] Discord-Fehler bei {user}: "
+            f"{error}"
+        )
+
     finally:
 
-        active_applications.discard(user.id)
+        active_applications.discard(
+            user.id
+        )
 
 
-async def send_application_review(user, answers):
+async def send_application_review(
+    user,
+    answers
+):
 
     channel = bot.get_channel(
         REVIEW_CHANNEL_ID
     )
 
     if channel is None:
+
+        print(
+            "[APPLICATION] Review-Kanal nicht gefunden."
+        )
+
         return
 
     embed = discord.Embed(
         title="🛠️ Neue Developer Bewerbung",
+        description=(
+            f"👤 Bewerber: **{user}**\n"
+            f"🆔 ID: `{user.id}`\n\n"
+            "━━━━━━━━━━━━━━━━━━━━"
+        ),
         color=discord.Color.green(),
-        timestamp=datetime.utcnow()
+        timestamp=now_utc()
     )
 
     embed.set_author(
@@ -1633,16 +2459,45 @@ async def send_application_review(user, answers):
         start=1
     ):
 
+        clean_answer = (
+            answer.strip()
+            if answer.strip()
+            else "Keine Antwort"
+        )
+
         embed.add_field(
-            name=f"Frage {number}",
-            value=answer[:1024],
+            name=f"📝 Frage {number}",
+            value=clean_answer[:1024],
             inline=False
         )
 
-    await channel.send(
-        embed=embed
+    embed.set_footer(
+        text="🛠️ Developer Bewerbungs-System"
     )
 
+    try:
+
+        await channel.send(
+            embed=embed
+        )
+
+    except discord.Forbidden:
+
+        print(
+            "[APPLICATION] Keine Berechtigung "
+            "im Review-Kanal."
+        )
+
+    except discord.HTTPException as error:
+
+        print(
+            f"[APPLICATION] Fehler beim Senden: {error}"
+        )
+
+
+# =========================================================
+# PANEL CLEANUP
+# =========================================================
 
 async def cleanup_panel_messages(
     channel,
@@ -1659,18 +2514,39 @@ async def cleanup_panel_messages(
         ):
 
             if (
-                message.author.id == bot.user.id
+                bot.user
+                and message.author.id == bot.user.id
                 and message.embeds
                 and message.embeds[0].title == title
             ):
 
-                await safe_delete(message)
+                await safe_delete(
+                    message
+                )
 
-    except Exception as e:
+    except discord.Forbidden:
+
         print(
-            f"[PANEL] Cleanup Fehler: {e}"
+            f"[PANEL] Keine Berechtigung für "
+            f"{channel}."
         )
 
+    except discord.HTTPException as error:
+
+        print(
+            f"[PANEL] Discord-Fehler: {error}"
+        )
+
+    except Exception as error:
+
+        print(
+            f"[PANEL] Cleanup-Fehler: {error}"
+        )
+
+
+# =========================================================
+# NAMETAG PANEL SENDEN
+# =========================================================
 
 async def send_nickname_panel():
 
@@ -1679,35 +2555,80 @@ async def send_nickname_panel():
     )
 
     if channel is None:
+
+        print(
+            "[PANEL] Nickname-Kanal nicht gefunden."
+        )
+
         return
 
     await cleanup_panel_messages(
         channel,
-        "🏷️ Nickname ändern"
+        "🏷️ Nickname-System"
     )
 
     embed = discord.Embed(
-        title="🏷️ Nickname ändern",
+        title="🏷️ Nickname-System",
         description=(
-            "### 🪪 Nametag-System\n\n"
-            "Du hast die Möglichkeit, dein **RLP** "
-            "vor deinem Namen zu entfernen.\n\n"
-            "🏷️ **Aktuell:** `RLP DeinName`\n\n"
-            "Wenn du auf **RLP entfernen** klickst, "
-            "wird dein Name ohne RLP gespeichert.\n\n"
-            "🔄 Auch nach einem Bot-Neustart bleibt "
-            "deine Auswahl erhalten.\n\n"
-            "⚠️ Wenn dir die RLP-Rolle später **neu gegeben** "
-            "wird, wird RLP wieder automatisch gesetzt."
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "### 🪪 RLP Nametag\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Wenn du die **RLP-Rolle** besitzt, wird "
+            "automatisch folgendes vor deinen Namen gesetzt:\n\n"
+            "🏷️ `RLP DeinName`\n\n"
+            "### ❌ RLP entfernen\n"
+            "Klicke auf den Button unten, wenn du das "
+            "RLP vor deinem Namen entfernen möchtest.\n\n"
+            "🔒 Deine Auswahl wird gespeichert und bleibt "
+            "auch nach einem Bot-Neustart bestehen.\n\n"
+            "### ♻️ RLP erneut erhalten\n"
+            "Wenn dir die RLP-Rolle später **neu gegeben** "
+            "wird, wird `RLP ` automatisch wieder gesetzt."
         ),
         color=discord.Color.blurple()
     )
 
-    await channel.send(
-        embed=embed,
-        view=NicknamePanelView()
+    embed.add_field(
+        name="ℹ️ Wichtig",
+        value=(
+            "Der Bot verwendet ausschließlich "
+            f"`{NAMETAG}` als Nametag."
+        ),
+        inline=False
     )
 
+    embed.set_footer(
+        text="🏷️ RLP Nametag-System"
+    )
+
+    try:
+
+        await channel.send(
+            embed=embed,
+            view=NicknamePanelView()
+        )
+
+        print(
+            "[PANEL] Nickname-Panel gesendet."
+        )
+
+    except discord.Forbidden:
+
+        print(
+            "[PANEL] Keine Berechtigung "
+            "im Nickname-Kanal."
+        )
+
+    except discord.HTTPException as error:
+
+        print(
+            f"[PANEL] Fehler beim Senden: {error}"
+        )
+
+
+# =========================================================
+# DEVELOPER PANEL SENDEN
+# =========================================================
 
 async def send_application_panel():
 
@@ -1716,6 +2637,11 @@ async def send_application_panel():
     )
 
     if channel is None:
+
+        print(
+            "[PANEL] Bewerbungs-Kanal nicht gefunden."
+        )
+
         return
 
     await cleanup_panel_messages(
@@ -1726,57 +2652,72 @@ async def send_application_panel():
     embed = discord.Embed(
         title="🛠️ Developer Bewerbung",
         description=(
-            "Du möchtest unser Development-Team unterstützen?\n\n"
-            "Klicke auf den Button unten und starte "
-            "deine Bewerbung.\n\n"
-            "📩 Die Bewerbung findet per DM statt.\n"
-            "⏱️ Für jede Frage hast du 5 Minuten Zeit."
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "### 💻 Werde Teil des Development-Teams\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Du interessierst dich für Programmierung "
+            "und möchtest unser Team unterstützen?\n\n"
+            "Dann kannst du dich über den Button unten "
+            "als **Developer** bewerben.\n\n"
+            "### 📩 Ablauf\n"
+            "1️⃣ Klicke auf **Developer bewerben**\n"
+            "2️⃣ Du bekommst eine DM vom Bot\n"
+            "3️⃣ Beantworte die Fragen einzeln\n"
+            "4️⃣ Die Bewerbung wird an das Team gesendet\n\n"
+            "⏱️ Für jede Frage hast du **5 Minuten** Zeit."
         ),
         color=discord.Color.green()
     )
 
-    await channel.send(
-        embed=embed,
-        view=DeveloperApplicationView()
+    embed.add_field(
+        name="📋 Bewerbung",
+        value=(
+            f"**{len(DEVELOPER_QUESTIONS)} Fragen** "
+            "warten auf dich."
+        ),
+        inline=True
     )
 
+    embed.add_field(
+        name="📬 Kontakt",
+        value=(
+            "Die Bewerbung findet vollständig "
+            "über deine DMs statt."
+        ),
+        inline=True
+    )
 
-# =========================================================
-# BOT KLASSE
-# =========================================================
+    embed.set_footer(
+        text="🛠️ Development Team"
+    )
 
-class RLPBot(commands.Bot):
+    try:
 
-    async def setup_hook(self):
-
-        load_data()
-
-        self.add_view(
-            NicknamePanelView()
+        await channel.send(
+            embed=embed,
+            view=DeveloperApplicationView()
         )
 
-        self.add_view(
-            DeveloperApplicationView()
+        print(
+            "[PANEL] Developer-Panel gesendet."
         )
 
-        # Für die persistenten Quiz-Buttons
-        self.add_view(
-            QuizView()
+    except discord.Forbidden:
+
+        print(
+            "[PANEL] Keine Berechtigung "
+            "im Bewerbungs-Kanal."
+        )
+
+    except discord.HTTPException as error:
+
+        print(
+            f"[PANEL] Fehler beim Senden: {error}"
         )
 
 
 # =========================================================
-# BOT ERSTELLEN
-# =========================================================
-
-bot = RLPBot(
-    command_prefix="!",
-    intents=intents
-)
-
-
-# =========================================================
-# READY
+# BOT READY
 # =========================================================
 
 @bot.event
@@ -1785,88 +2726,163 @@ async def on_ready():
     global startup_finished
 
     print(
-        f"✅ Bot online als {bot.user}"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    )
+
+    print(
+        f"🤖 Bot online als {bot.user}"
+    )
+
+    print(
+        f"🆔 Bot-ID: {bot.user.id}"
+    )
+
+    print(
+        f"🌐 Server: {len(bot.guilds)}"
+    )
+
+    print(
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
 
     if startup_finished:
-        return
 
-    startup_finished = True
-
-    refill_quiz_bag()
-
-    guild = bot.get_guild(
-        GUILD_ID
-    )
-
-    if guild is None:
-        print("[BOT] Server nicht gefunden.")
-        return
-
-    # -----------------------------------------------------
-    # RLP NAMETAGS
-    # -----------------------------------------------------
-
-    await update_all_rlp_nicknames()
-
-    # -----------------------------------------------------
-    # QUIZ
-    # -----------------------------------------------------
-
-    quiz_channel = bot.get_channel(
-        QUIZ_CHANNEL_ID
-    )
-
-    if quiz_channel:
-
-        # Alte Bot-Quiznachrichten entfernen
-        try:
-
-            async for message in quiz_channel.history(
-                limit=100
-            ):
-
-                if (
-                    message.author.id == bot.user.id
-                    and message.embeds
-                    and message.embeds[0].title == "🧠 Emoji Quiz"
-                ):
-                    await safe_delete(message)
-
-        except Exception as e:
-
-            print(
-                f"[QUIZ] Cleanup Fehler: {e}"
-            )
-
-        await send_new_quiz(
-            quiz_channel
+        print(
+            "[BOT] Startup bereits abgeschlossen."
         )
 
-    # -----------------------------------------------------
-    # PANELS
-    # -----------------------------------------------------
+        return
 
-    await send_nickname_panel()
+    try:
 
-    await send_application_panel()
+        guild = bot.get_guild(
+            GUILD_ID
+        )
 
-    print(
-        f"🧠 Emoji Quiz geladen: {len(QUIZZES)} Fragen"
-    )
+        if guild is None:
+
+            print(
+                "❌ [BOT] Server nicht gefunden."
+            )
+
+            return
+
+        # -------------------------------------------------
+        # QUIZ BAG
+        # -------------------------------------------------
+
+        refill_quiz_bag()
+
+        # -------------------------------------------------
+        # RLP NAMETAGS
+        # -------------------------------------------------
+
+        await update_all_rlp_nicknames()
+
+        # -------------------------------------------------
+        # QUIZ KANAL
+        # -------------------------------------------------
+
+        quiz_channel = bot.get_channel(
+            QUIZ_CHANNEL_ID
+        )
+
+        if quiz_channel:
+
+            try:
+
+                async for message in quiz_channel.history(
+                    limit=100
+                ):
+
+                    if (
+                        bot.user
+                        and message.author.id == bot.user.id
+                        and message.embeds
+                        and message.embeds[0].title
+                        == "🧠  EMOJI QUIZ"
+                    ):
+
+                        await safe_delete(
+                            message
+                        )
+
+            except Exception as error:
+
+                print(
+                    f"[QUIZ] Cleanup-Fehler: {error}"
+                )
+
+            await send_new_quiz(
+                quiz_channel
+            )
+
+        else:
+
+            print(
+                "⚠️ [QUIZ] Quiz-Kanal nicht gefunden."
+            )
+
+        # -------------------------------------------------
+        # PANELS
+        # -------------------------------------------------
+
+        await send_nickname_panel()
+
+        await send_application_panel()
+
+        startup_finished = True
+
+        print(
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        )
+
+        print(
+            "✅ RLP BOT ERFOLGREICH GESTARTET"
+        )
+
+        print(
+            f"🧠 {len(QUIZZES)} Quiz-Fragen geladen"
+        )
+
+        print(
+            "🏷️ RLP Nametag-System aktiv"
+        )
+
+        print(
+            "🛠️ Developer-System aktiv"
+        )
+
+        print(
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        )
+
+    except Exception as error:
+
+        print(
+            "❌ [STARTUP] Fehler:"
+        )
+
+        print(
+            repr(error)
+        )
 
 
 # =========================================================
-# MITGLIED BEITRITT
+# MEMBER JOIN
 # =========================================================
 
 @bot.event
-async def on_member_join(member):
+async def on_member_join(
+    member
+):
 
     if member.guild.id != GUILD_ID:
         return
 
-    await asyncio.sleep(2)
+    await asyncio.sleep(
+        2
+    )
 
     await set_rlp_nickname(
         member,
@@ -1875,35 +2891,62 @@ async def on_member_join(member):
 
 
 # =========================================================
-# RLP ROLLE WIRD VERGEBEN
+# RLP ROLLE WIRD VERGEBEN / ENTFERNT
 # =========================================================
 
 @bot.event
-async def on_member_update(before, after):
+async def on_member_update(
+    before,
+    after
+):
 
-    before_role = (
-        before.guild.get_role(
-            NAMETAG_ROLE_ID
-        )
+    if after.guild.id != GUILD_ID:
+        return
+
+    role = after.guild.get_role(
+        NAMETAG_ROLE_ID
     )
 
-    if before_role is None:
+    if role is None:
         return
 
     had_role_before = (
-        before_role in before.roles
+        role in before.roles
     )
 
     has_role_now = (
-        before_role in after.roles
+        role in after.roles
     )
 
-    # Rolle wurde neu gegeben
-    if not had_role_before and has_role_now:
+    # -----------------------------------------------------
+    # RLP ROLLE NEU VERGEBEN
+    # -----------------------------------------------------
+
+    if (
+        not had_role_before
+        and has_role_now
+    ):
+
+        print(
+            f"[RLP] Rolle neu vergeben an {after}"
+        )
 
         await set_rlp_nickname(
             after,
             force=True
+        )
+
+    # -----------------------------------------------------
+    # RLP ROLLE ENTFERNT
+    # -----------------------------------------------------
+
+    if (
+        had_role_before
+        and not has_role_now
+    ):
+
+        print(
+            f"[RLP] Rolle entfernt bei {after}"
         )
 
 
@@ -1912,12 +2955,16 @@ async def on_member_update(before, after):
 # =========================================================
 
 @bot.event
-async def on_message(message):
+async def on_message(
+    message
+):
 
     if message.author.bot:
         return
 
-    await bot.process_commands(message)
+    await bot.process_commands(
+        message
+    )
 
 
 # =========================================================
@@ -1941,14 +2988,43 @@ async def on_command_error(
         commands.MissingPermissions
     ):
 
+        embed = discord.Embed(
+            title="❌ Keine Berechtigung",
+            description=(
+                "Du besitzt nicht die erforderliche "
+                "Berechtigung für diesen Befehl."
+            ),
+            color=discord.Color.red()
+        )
+
         await ctx.send(
-            "❌ Dafür hast du keine Berechtigung."
+            embed=embed
+        )
+
+        return
+
+    if isinstance(
+        error,
+        commands.MissingRequiredArgument
+    ):
+
+        embed = discord.Embed(
+            title="❌ Fehlendes Argument",
+            description=(
+                "Für diesen Befehl fehlen benötigte "
+                "Angaben."
+            ),
+            color=discord.Color.orange()
+        )
+
+        await ctx.send(
+            embed=embed
         )
 
         return
 
     print(
-        f"[COMMAND ERROR] {error}"
+        f"[COMMAND ERROR] {repr(error)}"
     )
 
 
@@ -1961,13 +3037,21 @@ TOKEN = os.environ.get(
 )
 
 if not TOKEN:
+
     raise RuntimeError(
-        "DISCORD_TOKEN wurde nicht gefunden."
+        "❌ DISCORD_TOKEN wurde nicht gefunden. "
+        "Bitte überprüfe dein GitHub-Secret."
     )
 
 
 # =========================================================
-# START
+# BOT STARTEN
 # =========================================================
 
-bot.run(TOKEN)
+print(
+    "🚀 Starte RLP Bot..."
+)
+
+bot.run(
+    TOKEN
+)
