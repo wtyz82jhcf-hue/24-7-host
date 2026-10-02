@@ -13,6 +13,18 @@ QUIZ_CHANNEL_ID = 1533409789256925185
 APPLICATION_CHANNEL_ID = 1541391365219295343
 REVIEW_CHANNEL_ID = 1548404201493762181
 
+# Nickname-Panel
+NICKNAME_CHANNEL_ID = 1555684071911202836
+
+# Server
+GUILD_ID = 1519481018221072454
+
+# Rolle für den Nametag
+NAMETAG_ROLE_ID = 1520102928398942348
+
+# Nametag
+NAMETAG = "𝙍𝙇𝙋 ✘ "
+
 
 # ============================================================
 # EMOJI QUIZZE
@@ -224,6 +236,7 @@ DEVELOPER_QUESTIONS = [
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 
 bot = None
 
@@ -255,10 +268,6 @@ hint_counts = {}
 # TEMPORÄRE BOT-NACHRICHTEN
 # ============================================================
 
-# Nachricht pro User und Aktion.
-# Beispiel:
-# (123456, "skip")
-# (123456, "hint")
 temporary_messages = {}
 
 
@@ -469,7 +478,6 @@ async def send_new_quiz():
         print("❌ Quiz-Kanal nicht gefunden.")
         return
 
-    # Alte temporäre Nachrichten entfernen
     for key, message in list(
         temporary_messages.items()
     ):
@@ -483,7 +491,6 @@ async def send_new_quiz():
             None
         )
 
-    # Zähler für neues Quiz zurücksetzen
     skip_counts.clear()
     hint_counts.clear()
 
@@ -571,7 +578,6 @@ class QuizView(
         global current_quiz
         global current_quiz_message
 
-        # Prüfen, ob Button noch zum aktuellen Quiz gehört
         if (
             current_quiz_message is None
             or interaction.message.id
@@ -592,10 +598,6 @@ class QuizView(
             0
         )
 
-        # ====================================================
-        # 3/3 BEREITS ERREICHT
-        # ====================================================
-
         if used >= 3:
 
             await interaction.response.defer()
@@ -613,28 +615,15 @@ class QuizView(
 
             return
 
-        # ====================================================
-        # ZÄHLER ERHÖHEN
-        # ====================================================
-
         skip_counts[user_id] = used + 1
 
         current_message = current_quiz_message
 
-        # Interaktion bestätigen
         await interaction.response.defer()
-
-        # ====================================================
-        # ALTES QUIZ LÖSCHEN
-        # ====================================================
 
         await safe_delete(
             current_message
         )
-
-        # ====================================================
-        # NEUES QUIZ
-        # ====================================================
 
         current_quiz = get_next_quiz()
 
@@ -646,10 +635,6 @@ class QuizView(
             embed=embed,
             view=QuizView()
         )
-
-        # ====================================================
-        # MELDUNG
-        # ====================================================
 
         if skip_counts[user_id] == 3:
 
@@ -696,7 +681,6 @@ class QuizView(
         global current_quiz
         global current_quiz_message
 
-        # Prüfen, ob Button aktuell ist
         if (
             current_quiz_message is None
             or interaction.message.id
@@ -717,10 +701,6 @@ class QuizView(
             0
         )
 
-        # ====================================================
-        # 3/3 BEREITS ERREICHT
-        # ====================================================
-
         if used >= 3:
 
             await interaction.response.defer()
@@ -739,10 +719,6 @@ class QuizView(
 
             return
 
-        # ====================================================
-        # ZÄHLER
-        # ====================================================
-
         hint_counts[user_id] = used + 1
 
         answer = current_quiz[1]
@@ -750,10 +726,6 @@ class QuizView(
         first_letter = answer[0].upper()
 
         await interaction.response.defer()
-
-        # ====================================================
-        # ÖFFENTLICHE MELDUNG
-        # ====================================================
 
         if hint_counts[user_id] == 3:
 
@@ -782,6 +754,264 @@ class QuizView(
             "hint",
             message
         )
+
+
+# ============================================================
+# NICKNAME SYSTEM
+# ============================================================
+
+def get_base_name(member):
+
+    current_name = member.nick or member.name
+
+    if current_name.startswith(NAMETAG):
+        current_name = current_name[len(NAMETAG):]
+
+    return current_name.strip()
+
+
+async def set_nametag(member):
+
+    if member.bot:
+        return
+
+    if not member.guild:
+        return
+
+    # Nur auf dem richtigen Server
+    if member.guild.id != GUILD_ID:
+        return
+
+    role = member.guild.get_role(
+        NAMETAG_ROLE_ID
+    )
+
+    if role is None:
+        print("❌ Nametag-Rolle nicht gefunden.")
+        return
+
+    # Hat die Person die Nametag-Rolle nicht,
+    # wird NICHTS verändert.
+    if role not in member.roles:
+        return
+
+    current_name = member.nick or member.name
+
+    # WICHTIG:
+    # Wenn der Nametag bereits vorhanden ist,
+    # wird der Nickname NICHT erneut geändert.
+    if current_name.startswith(NAMETAG):
+        return
+
+    base_name = get_base_name(member)
+
+    # Discord-Nickname maximal 32 Zeichen
+    new_nickname = (
+        NAMETAG + base_name
+    )[:32]
+
+    # Sicherheit:
+    # Wenn der gewünschte Nickname bereits identisch ist,
+    # keine API-Anfrage machen.
+    if current_name == new_nickname:
+        return
+
+    try:
+
+        await member.edit(
+            nick=new_nickname,
+            reason="Automatischer RLP Nametag"
+        )
+
+        print(
+            f"✅ Nametag gesetzt: {member} → {new_nickname}"
+        )
+
+    except discord.Forbidden:
+
+        print(
+            f"❌ Keine Berechtigung, Nickname von {member} zu ändern."
+        )
+
+    except discord.HTTPException as error:
+
+        print(
+            f"❌ Nickname-Fehler bei {member}: {error}"
+        )
+
+
+# ============================================================
+# NICKNAME PANEL VIEW
+# ============================================================
+
+class NicknamePanelView(
+    discord.ui.View
+):
+
+    def __init__(self):
+
+        super().__init__(
+            timeout=None
+        )
+
+
+    @discord.ui.button(
+        label="Nickname ändern",
+        emoji="✏️",
+        style=discord.ButtonStyle.primary,
+        custom_id="nickname_change_button"
+    )
+    async def change_nickname(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        member = interaction.guild.get_member(
+            interaction.user.id
+        )
+
+        if member is None:
+
+            await interaction.response.send_message(
+                "❌ Du konntest nicht gefunden werden.",
+                ephemeral=True
+            )
+
+            return
+
+        current_nickname = member.nick
+
+        # Prüfen, ob Nametag vorhanden ist
+        if (
+            current_nickname is None
+            or not current_nickname.startswith(NAMETAG)
+        ):
+
+            await interaction.response.send_message(
+                "ℹ️ Dein Nickname enthält aktuell "
+                "keinen **𝙍𝙇𝙋 ✘** Nametag.",
+                ephemeral=True
+            )
+
+            return
+
+        # Nametag entfernen
+        new_nickname = current_nickname[
+            len(NAMETAG):
+        ].strip()
+
+        # Wenn danach nichts mehr übrig ist,
+        # Nickname zurücksetzen
+        if not new_nickname:
+
+            new_nickname = None
+
+        try:
+
+            await member.edit(
+                nick=new_nickname,
+                reason="Nametag durch Benutzer entfernt"
+            )
+
+        except discord.Forbidden:
+
+            await interaction.response.send_message(
+                "❌ Ich kann deinen Nickname nicht ändern.\n"
+                "Bitte prüfe die Rollen-Reihenfolge "
+                "und die Berechtigung **Nickname verwalten**.",
+                ephemeral=True
+            )
+
+            return
+
+        except discord.HTTPException:
+
+            await interaction.response.send_message(
+                "❌ Beim Ändern deines Nicknames ist ein Fehler aufgetreten.",
+                ephemeral=True
+            )
+
+            return
+
+        await interaction.response.send_message(
+            "✅ **Nickname erfolgreich entfernt!**\n\n"
+            "Der Nametag **𝙍𝙇𝙋 ✘** wurde entfernt.",
+            ephemeral=True
+        )
+
+
+# ============================================================
+# NICKNAME PANEL SENDEN
+# ============================================================
+
+async def send_nickname_panel():
+
+    channel = bot.get_channel(
+        NICKNAME_CHANNEL_ID
+    )
+
+    if channel is None:
+
+        print(
+            "❌ Nickname-Kanal nicht gefunden."
+        )
+
+        return
+
+    # Alte Panels des Bots löschen
+    try:
+
+        async for message in channel.history(
+            limit=100
+        ):
+
+            if message.author != bot.user:
+                continue
+
+            if not message.embeds:
+                continue
+
+            if (
+                message.embeds[0].title
+                == "Nickname Ändern!"
+            ):
+
+                await safe_delete(
+                    message
+                )
+
+    except discord.Forbidden:
+
+        print(
+            "❌ Keine Berechtigung im Nickname-Kanal."
+        )
+
+        return
+
+    embed = discord.Embed(
+        title="Nickname Ändern!",
+        description=(
+            "Hier Kannst du dein Nickname von "
+            "**𝙍𝙇𝙋 ✘** lassen oder das "
+            "**𝙍𝙇𝙋 ✘** Entfernen so das nur noch "
+            "dein Namen da steht ohne **𝙍𝙇𝙋 ✘**."
+        ),
+        color=discord.Color.blurple()
+    )
+
+    embed.set_footer(
+        text="Nickname-System"
+    )
+
+    await channel.send(
+        embed=embed,
+        view=NicknamePanelView()
+    )
+
+    print(
+        "✅ Neues Nickname-Panel gesendet."
+    )
 
 
 # ============================================================
@@ -1020,6 +1250,7 @@ async def send_application_panel():
 
         return
 
+    # ALTES PANEL LÖSCHEN
     try:
 
         async for message in channel.history(
@@ -1037,7 +1268,9 @@ async def send_application_panel():
                 == "👨‍💻 Developer Bewerbung"
             ):
 
-                return
+                await safe_delete(
+                    message
+                )
 
     except discord.Forbidden:
 
@@ -1047,6 +1280,7 @@ async def send_application_panel():
 
         return
 
+    # NEUES PANEL
     embed = discord.Embed(
         title="👨‍💻 Developer Bewerbung",
         description=(
@@ -1068,6 +1302,10 @@ async def send_application_panel():
         view=DeveloperApplicationView()
     )
 
+    print(
+        "✅ Neues Developer-Bewerbungspanel gesendet."
+    )
+
 
 # ============================================================
 # BOT KLASSE
@@ -1087,8 +1325,10 @@ class QuizBot(
             DeveloperApplicationView()
         )
 
-        # Hintergrundtask:
-        # temporäre Nachrichten alle 5 Sekunden löschen
+        self.add_view(
+            NicknamePanelView()
+        )
+
         self.loop.create_task(
             temporary_message_cleaner()
         )
@@ -1117,6 +1357,10 @@ async def on_ready():
 
     startup_finished = True
 
+    # ========================================================
+    # NEUES EMOJI QUIZ
+    # ========================================================
+
     quiz_channel = bot.get_channel(
         QUIZ_CHANNEL_ID
     )
@@ -1135,7 +1379,73 @@ async def on_ready():
             "❌ Quiz-Kanal nicht gefunden."
         )
 
+    # ========================================================
+    # NEUES DEVELOPER PANEL
+    # ========================================================
+
     await send_application_panel()
+
+    # ========================================================
+    # NEUES NICKNAME PANEL
+    # ========================================================
+
+    await send_nickname_panel()
+
+    # ========================================================
+    # WICHTIG:
+    # KEIN update_all_nametags() MEHR!
+    #
+    # Dadurch werden beim Bot-Neustart bestehende
+    # Nicknames NICHT verändert.
+    # ========================================================
+
+
+# ============================================================
+# MEMBER JOIN
+# ============================================================
+
+@bot.event
+async def on_member_join(member):
+
+    if member.guild.id != GUILD_ID:
+        return
+
+    await asyncio.sleep(2)
+
+    await set_nametag(
+        member
+    )
+
+
+# ============================================================
+# ROLE UPDATE
+# ============================================================
+
+@bot.event
+async def on_member_update(
+    before,
+    after
+):
+
+    if after.guild.id != GUILD_ID:
+        return
+
+    role = after.guild.get_role(
+        NAMETAG_ROLE_ID
+    )
+
+    if role is None:
+        return
+
+    # Rolle wurde neu hinzugefügt
+    if (
+        role not in before.roles
+        and role in after.roles
+    ):
+
+        await set_nametag(
+            after
+        )
 
 
 # ============================================================
@@ -1178,7 +1488,6 @@ async def on_message(message):
             if current_quiz is None:
                 return
 
-            # Alle temporären Meldungen löschen
             for key, temp_message in list(
                 temporary_messages.items()
             ):
@@ -1211,7 +1520,6 @@ async def on_message(message):
                 result_message
             )
 
-            # Neues Quiz
             await send_new_quiz()
 
         return
