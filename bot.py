@@ -1,7 +1,9 @@
+```python
 import os
 import random
 import re
 import asyncio
+import json
 import discord
 
 
@@ -16,14 +18,25 @@ REVIEW_CHANNEL_ID = 1548404201493762181
 # Nickname-Panel
 NICKNAME_CHANNEL_ID = 1555684071911202836
 
-# Server
+
+# ============================================================
+# SERVER
+# ============================================================
+
 GUILD_ID = 1519481018221072454
 
-# Rolle für den Nametag
+
+# ============================================================
+# RLP NAMETAG
+# ============================================================
+
 NAMETAG_ROLE_ID = 1520102928398942348
 
-# Nametag
-NAMETAG = "𝙍𝙇𝙋 ✘ "
+# NUR RLP
+NAMETAG = "RLP "
+
+# Hier wird gespeichert, wer RLP selbst entfernt hat
+NAMETAG_DATA_FILE = "nametag_data.json"
 
 
 # ============================================================
@@ -279,6 +292,68 @@ active_applications = set()
 
 
 # ============================================================
+# NAMETAG-DATEN
+# ============================================================
+
+def load_nametag_data():
+
+    if not os.path.exists(NAMETAG_DATA_FILE):
+        return set()
+
+    try:
+
+        with open(
+            NAMETAG_DATA_FILE,
+            "r",
+            encoding="utf-8"
+        ) as file:
+
+            data = json.load(file)
+
+            if not isinstance(data, list):
+                return set()
+
+            return {
+                int(user_id)
+                for user_id in data
+            }
+
+    except Exception as error:
+
+        print(
+            f"❌ Fehler beim Laden der Nametag-Daten: {error}"
+        )
+
+        return set()
+
+
+nametag_removed_users = load_nametag_data()
+
+
+def save_nametag_data():
+
+    try:
+
+        with open(
+            NAMETAG_DATA_FILE,
+            "w",
+            encoding="utf-8"
+        ) as file:
+
+            json.dump(
+                list(nametag_removed_users),
+                file,
+                indent=4
+            )
+
+    except Exception as error:
+
+        print(
+            f"❌ Fehler beim Speichern der Nametag-Daten: {error}"
+        )
+
+
+# ============================================================
 # NORMALISIEREN
 # ============================================================
 
@@ -315,16 +390,23 @@ async def safe_delete(message):
         return
 
     try:
+
         await message.delete()
 
     except discord.NotFound:
         pass
 
     except discord.Forbidden:
-        print("❌ Keine Berechtigung zum Löschen.")
+
+        print(
+            "❌ Keine Berechtigung zum Löschen."
+        )
 
     except discord.HTTPException as error:
-        print(f"❌ Löschfehler: {error}")
+
+        print(
+            f"❌ Löschfehler: {error}"
+        )
 
 
 # ============================================================
@@ -347,6 +429,7 @@ async def replace_temporary_message(
     )
 
     if old_message is not None:
+
         await safe_delete(
             old_message
         )
@@ -407,6 +490,7 @@ def get_next_quiz():
     global last_quiz_emojis
 
     if not quiz_bag:
+
         refill_quiz_bag()
 
     for position, index in enumerate(
@@ -475,7 +559,11 @@ async def send_new_quiz():
     )
 
     if channel is None:
-        print("❌ Quiz-Kanal nicht gefunden.")
+
+        print(
+            "❌ Quiz-Kanal nicht gefunden."
+        )
+
         return
 
     for key, message in list(
@@ -757,28 +845,37 @@ class QuizView(
 
 
 # ============================================================
-# NICKNAME SYSTEM
+# RLP NAMETAG SYSTEM
 # ============================================================
 
 def get_base_name(member):
 
     current_name = member.nick or member.name
 
-    if current_name.startswith(NAMETAG):
-        current_name = current_name[len(NAMETAG):]
+    # Entfernt vorhandene RLP-Präfixe.
+    # Verhindert:
+    # RLP RLP Max
+    # RLP RLP RLP Max
+    while current_name.startswith(NAMETAG):
+
+        current_name = current_name[
+            len(NAMETAG):
+        ]
 
     return current_name.strip()
 
 
-async def set_nametag(member):
+async def set_nametag(
+    member,
+    force=False
+):
 
     if member.bot:
         return
 
-    if not member.guild:
+    if member.guild is None:
         return
 
-    # Nur auf dem richtigen Server
     if member.guild.id != GUILD_ID:
         return
 
@@ -787,33 +884,45 @@ async def set_nametag(member):
     )
 
     if role is None:
-        print("❌ Nametag-Rolle nicht gefunden.")
+
+        print(
+            "❌ RLP-Rolle nicht gefunden."
+        )
+
         return
 
-    # Hat die Person die Nametag-Rolle nicht,
-    # wird NICHTS verändert.
+    # Ohne RLP-Rolle nichts machen
     if role not in member.roles:
+        return
+
+    # Wenn der Benutzer RLP selbst entfernt hat,
+    # bleibt es auch beim Neustart entfernt.
+    #
+    # force=True wird nur verwendet,
+    # wenn die Rolle gerade neu vergeben wurde
+    # oder der Benutzer neu beigetreten ist.
+    if (
+        member.id in nametag_removed_users
+        and not force
+    ):
+
         return
 
     current_name = member.nick or member.name
 
-    # WICHTIG:
-    # Wenn der Nametag bereits vorhanden ist,
-    # wird der Nickname NICHT erneut geändert.
-    if current_name.startswith(NAMETAG):
-        return
+    base_name = get_base_name(
+        member
+    )
 
-    base_name = get_base_name(member)
-
-    # Discord-Nickname maximal 32 Zeichen
+    # RLP + Name
     new_nickname = (
         NAMETAG + base_name
     )[:32]
 
-    # Sicherheit:
-    # Wenn der gewünschte Nickname bereits identisch ist,
-    # keine API-Anfrage machen.
+    # Wenn bereits exakt richtig:
+    # NICHTS machen.
     if current_name == new_nickname:
+
         return
 
     try:
@@ -823,14 +932,23 @@ async def set_nametag(member):
             reason="Automatischer RLP Nametag"
         )
 
+        # User ist nicht mehr im Opt-Out,
+        # weil RLP jetzt wieder gesetzt wurde.
+        nametag_removed_users.discard(
+            member.id
+        )
+
+        save_nametag_data()
+
         print(
-            f"✅ Nametag gesetzt: {member} → {new_nickname}"
+            f"✅ RLP gesetzt: {member} → {new_nickname}"
         )
 
     except discord.Forbidden:
 
         print(
-            f"❌ Keine Berechtigung, Nickname von {member} zu ändern."
+            f"❌ Keine Berechtigung, Nickname von "
+            f"{member} zu ändern."
         )
 
     except discord.HTTPException as error:
@@ -838,6 +956,62 @@ async def set_nametag(member):
         print(
             f"❌ Nickname-Fehler bei {member}: {error}"
         )
+
+
+# ============================================================
+# ALLE RLP NAMETAGS BEIM BOT-START
+# ============================================================
+
+async def update_all_nametags():
+
+    guild = bot.get_guild(
+        GUILD_ID
+    )
+
+    if guild is None:
+
+        print(
+            "❌ Server für RLP-System nicht gefunden."
+        )
+
+        return
+
+    role = guild.get_role(
+        NAMETAG_ROLE_ID
+    )
+
+    if role is None:
+
+        print(
+            "❌ RLP-Rolle nicht gefunden."
+        )
+
+        return
+
+    print(
+        f"🔄 Prüfe RLP-Nametags für "
+        f"{len(role.members)} Mitglieder..."
+    )
+
+    for member in role.members:
+
+        # force=False!
+        #
+        # Dadurch werden Benutzer,
+        # die RLP selbst entfernt haben,
+        # NICHT wieder zurückgesetzt.
+        await set_nametag(
+            member,
+            force=False
+        )
+
+        await asyncio.sleep(
+            0.2
+        )
+
+    print(
+        "✅ Alle RLP-Nametags wurden überprüft."
+    )
 
 
 # ============================================================
@@ -856,7 +1030,7 @@ class NicknamePanelView(
 
 
     @discord.ui.button(
-        label="Nickname ändern",
+        label="RLP entfernen",
         emoji="✏️",
         style=discord.ButtonStyle.primary,
         custom_id="nickname_change_button"
@@ -866,6 +1040,24 @@ class NicknamePanelView(
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+
+        if interaction.guild is None:
+
+            await interaction.response.send_message(
+                "❌ Dieser Button funktioniert nur auf dem Server.",
+                ephemeral=True
+            )
+
+            return
+
+        if interaction.guild.id != GUILD_ID:
+
+            await interaction.response.send_message(
+                "❌ Dieser Button funktioniert auf diesem Server nicht.",
+                ephemeral=True
+            )
+
+            return
 
         member = interaction.guild.get_member(
             interaction.user.id
@@ -880,29 +1072,72 @@ class NicknamePanelView(
 
             return
 
-        current_nickname = member.nick
+        role = interaction.guild.get_role(
+            NAMETAG_ROLE_ID
+        )
 
-        # Prüfen, ob Nametag vorhanden ist
-        if (
-            current_nickname is None
-            or not current_nickname.startswith(NAMETAG)
-        ):
+        if role is None:
 
             await interaction.response.send_message(
-                "ℹ️ Dein Nickname enthält aktuell "
-                "keinen **𝙍𝙇𝙋 ✘** Nametag.",
+                "❌ Die RLP-Rolle wurde nicht gefunden.",
                 ephemeral=True
             )
 
             return
 
-        # Nametag entfernen
-        new_nickname = current_nickname[
+        # User muss die Rolle besitzen
+        if role not in member.roles:
+
+            await interaction.response.send_message(
+                "❌ Du hast die RLP-Rolle nicht.",
+                ephemeral=True
+            )
+
+            return
+
+        current_nickname = member.nick
+
+        # ====================================================
+        # AKTUELLER NAME
+        # ====================================================
+
+        current_name = (
+            current_nickname
+            or member.name
+        )
+
+        # ====================================================
+        # RLP NICHT VORHANDEN
+        # ====================================================
+
+        if not current_name.startswith(NAMETAG):
+
+            # Trotzdem dauerhaft speichern,
+            # damit der Bot RLP beim nächsten Start
+            # nicht automatisch hinzufügt.
+            nametag_removed_users.add(
+                member.id
+            )
+
+            save_nametag_data()
+
+            await interaction.response.send_message(
+                "ℹ️ Dein Nickname enthält aktuell kein **RLP**.\n\n"
+                "Ich werde **RLP** nicht automatisch wieder hinzufügen.",
+                ephemeral=True
+            )
+
+            return
+
+        # ====================================================
+        # RLP ENTFERNEN
+        # ====================================================
+
+        new_nickname = current_name[
             len(NAMETAG):
         ].strip()
 
-        # Wenn danach nichts mehr übrig ist,
-        # Nickname zurücksetzen
+        # Falls nach RLP nichts mehr übrig bleibt
         if not new_nickname:
 
             new_nickname = None
@@ -911,21 +1146,26 @@ class NicknamePanelView(
 
             await member.edit(
                 nick=new_nickname,
-                reason="Nametag durch Benutzer entfernt"
+                reason="RLP Nametag durch Benutzer entfernt"
             )
 
         except discord.Forbidden:
 
             await interaction.response.send_message(
-                "❌ Ich kann deinen Nickname nicht ändern.\n"
-                "Bitte prüfe die Rollen-Reihenfolge "
-                "und die Berechtigung **Nickname verwalten**.",
+                "❌ Ich kann deinen Nickname nicht ändern.\n\n"
+                "Bitte prüfe:\n"
+                "• **Nickname verwalten** für den Bot\n"
+                "• Die Bot-Rolle muss über der Rolle des Benutzers stehen.",
                 ephemeral=True
             )
 
             return
 
-        except discord.HTTPException:
+        except discord.HTTPException as error:
+
+            print(
+                f"❌ Fehler beim Entfernen von RLP: {error}"
+            )
 
             await interaction.response.send_message(
                 "❌ Beim Ändern deines Nicknames ist ein Fehler aufgetreten.",
@@ -934,9 +1174,21 @@ class NicknamePanelView(
 
             return
 
+        # ====================================================
+        # USER DAUERHAFT SPEICHERN
+        # ====================================================
+
+        nametag_removed_users.add(
+            member.id
+        )
+
+        save_nametag_data()
+
         await interaction.response.send_message(
-            "✅ **Nickname erfolgreich entfernt!**\n\n"
-            "Der Nametag **𝙍𝙇𝙋 ✘** wurde entfernt.",
+            "✅ **RLP wurde entfernt!**\n\n"
+            "Dein Nickname bleibt jetzt ohne **RLP**.\n"
+            "Auch nach einem Neustart des Bots wird RLP "
+            "nicht automatisch wieder hinzugefügt.",
             ephemeral=True
         )
 
@@ -959,7 +1211,6 @@ async def send_nickname_panel():
 
         return
 
-    # Alte Panels des Bots löschen
     try:
 
         async for message in channel.history(
@@ -992,16 +1243,19 @@ async def send_nickname_panel():
     embed = discord.Embed(
         title="Nickname Ändern!",
         description=(
-            "Hier Kannst du dein Nickname von "
-            "**𝙍𝙇𝙋 ✘** lassen oder das "
-            "**𝙍𝙇𝙋 ✘** Entfernen so das nur noch "
-            "dein Namen da steht ohne **𝙍𝙇𝙋 ✘**."
+            "Hier kannst du **RLP** vor deinem Namen "
+            "entfernen.\n\n"
+            "Wenn du **RLP** entfernst, bleibt dein "
+            "Nickname auch nach einem Bot-Neustart "
+            "ohne RLP.\n\n"
+            "Wenn dir die RLP-Rolle später neu gegeben "
+            "wird, wird **RLP** wieder vor deinen Namen gesetzt."
         ),
         color=discord.Color.blurple()
     )
 
     embed.set_footer(
-        text="Nickname-System"
+        text="RLP Nickname-System"
     )
 
     await channel.send(
@@ -1250,7 +1504,6 @@ async def send_application_panel():
 
         return
 
-    # ALTES PANEL LÖSCHEN
     try:
 
         async for message in channel.history(
@@ -1280,7 +1533,6 @@ async def send_application_panel():
 
         return
 
-    # NEUES PANEL
     embed = discord.Embed(
         title="👨‍💻 Developer Bewerbung",
         description=(
@@ -1358,7 +1610,7 @@ async def on_ready():
     startup_finished = True
 
     # ========================================================
-    # NEUES EMOJI QUIZ
+    # EMOJI QUIZ
     # ========================================================
 
     quiz_channel = bot.get_channel(
@@ -1380,24 +1632,27 @@ async def on_ready():
         )
 
     # ========================================================
-    # NEUES DEVELOPER PANEL
+    # DEVELOPER PANEL
     # ========================================================
 
     await send_application_panel()
 
     # ========================================================
-    # NEUES NICKNAME PANEL
+    # NICKNAME PANEL
     # ========================================================
 
     await send_nickname_panel()
 
     # ========================================================
-    # WICHTIG:
-    # KEIN update_all_nametags() MEHR!
-    #
-    # Dadurch werden beim Bot-Neustart bestehende
-    # Nicknames NICHT verändert.
+    # RLP NAMETAGS
     # ========================================================
+
+    # Beim Start werden ALLE Mitglieder mit der
+    # RLP-Rolle überprüft.
+    #
+    # Personen, die RLP vorher selbst entfernt haben,
+    # werden durch die JSON-Datei übersprungen.
+    await update_all_nametags()
 
 
 # ============================================================
@@ -1412,8 +1667,12 @@ async def on_member_join(member):
 
     await asyncio.sleep(2)
 
+    # Neues Mitglied:
+    # Wenn es die RLP-Rolle besitzt,
+    # soll RLP gesetzt werden.
     await set_nametag(
-        member
+        member,
+        force=True
     )
 
 
@@ -1437,14 +1696,26 @@ async def on_member_update(
     if role is None:
         return
 
-    # Rolle wurde neu hinzugefügt
+    # ========================================================
+    # ROLLE WURDE NEU VERGEBEN
+    # ========================================================
+
     if (
         role not in before.roles
         and role in after.roles
     ):
 
+        # Wenn die Rolle neu vergeben wird,
+        # darf RLP wieder gesetzt werden.
+        nametag_removed_users.discard(
+            after.id
+        )
+
+        save_nametag_data()
+
         await set_nametag(
-            after
+            after,
+            force=True
         )
 
 
@@ -1563,3 +1834,4 @@ if not TOKEN:
 bot.run(
     TOKEN
 )
+```
