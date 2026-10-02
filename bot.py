@@ -1,3 +1,4 @@
+```python
 import os
 import json
 import random
@@ -28,14 +29,16 @@ REVIEW_CHANNEL_ID = 1548404201493762181
 
 NICKNAME_CHANNEL_ID = 1555684071911202836
 
-# Support-VOICE-CHANNEL
+# Support-Call
 SUPPORT_VOICE_CHANNEL_ID = 1519788919254679602
 
-# Support-Textkanal für Abschlussberichte / Informationen
+# Support-Abschlussberichte / Support-Panel
 SUPPORT_LOG_CHANNEL_ID = 1521439818146648064
 
+# Teamler-Registrierung
 TEAM_REGISTER_CHANNEL_ID = 1527350468832006276
 
+# Developer
 DEVELOPER_TASK_CHANNEL_ID = 1540442867334385715
 DEVELOPER_SHIFT_CHANNEL_ID = 1540797414863151155
 
@@ -108,14 +111,14 @@ startup_finished = False
 #                         HILFSFUNKTIONEN
 # ============================================================
 
+def now():
+    return datetime.now(timezone.utc)
+
+
 def normalize(value):
     return " ".join(
         str(value).strip().lower().split()
     )
-
-
-def now():
-    return datetime.now(timezone.utc)
 
 
 def format_datetime(dt):
@@ -142,31 +145,21 @@ def format_duration(seconds):
     return f"{seconds} Sek."
 
 
-async def safe_delete(message):
-    try:
-        await message.delete()
-    except (
-        discord.NotFound,
-        discord.Forbidden,
-        discord.HTTPException
-    ):
-        pass
-
-
 def generate_case_id():
     letters = string.ascii_uppercase
 
-    code = "".join(
+    return "#S-" + "".join(
         random.choice(letters)
         for _ in range(10)
     )
 
-    return f"#S-{code}"
 
+async def safe_delete(message):
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
-# ============================================================
-#                         EMBEDS
-# ============================================================
 
 def base_embed(
     title,
@@ -188,6 +181,26 @@ def base_embed(
     )
 
     return embed
+
+
+async def clean_bot_panel(
+    channel,
+    title
+):
+    if not hasattr(channel, "history"):
+        return
+
+    async for message in channel.history(
+        limit=None
+    ):
+        if (
+            message.author == bot.user
+            and message.embeds
+            and message.embeds[0].title == title
+        ):
+            await safe_delete(message)
+
+            await asyncio.sleep(0.1)
 
 
 # ============================================================
@@ -263,14 +276,15 @@ def load_data():
 def save_data():
     try:
         data = {
-            "nametag_removed_users":
-                list(nametag_removed_users),
+            "nametag_removed_users": list(
+                nametag_removed_users
+            ),
 
-            "quiz_scores":
-                quiz_scores,
+            "quiz_scores": quiz_scores,
 
-            "active_team_members":
-                list(active_team_members),
+            "active_team_members": list(
+                active_team_members
+            ),
 
             "active_developer_shifts":
                 active_developer_shifts,
@@ -331,21 +345,25 @@ async def set_rlp_nickname(
     if role not in member.roles:
         return
 
+    # Wenn der Nutzer das Nametag selbst entfernt hat,
+    # bleibt es normalerweise entfernt.
     if (
         member.id in nametag_removed_users
         and not force
     ):
         return
 
+    # Rolle wurde neu vergeben -> Nametag wieder aktivieren.
     if force:
-        if member.id in nametag_removed_users:
-            nametag_removed_users.discard(
-                member.id
-            )
+        nametag_removed_users.discard(
+            member.id
+        )
 
-            save_data()
+        save_data()
 
-    clean_name = get_clean_name(member)
+    clean_name = get_clean_name(
+        member
+    )
 
     nickname = f"{NAMETAG}{clean_name}"
 
@@ -361,7 +379,7 @@ async def set_rlp_nickname(
 
     except discord.Forbidden:
         print(
-            f"[NAMETAG] Keine Rechte für {member}."
+            f"[NAMETAG] Keine Rechte für {member}"
         )
 
     except discord.HTTPException as error:
@@ -371,7 +389,9 @@ async def set_rlp_nickname(
 
 
 async def remove_rlp_nickname(member):
-    clean_name = get_clean_name(member)
+    clean_name = get_clean_name(
+        member
+    )
 
     nametag_removed_users.add(
         member.id
@@ -393,7 +413,9 @@ async def remove_rlp_nickname(member):
 
 
 async def update_all_rlp_nicknames():
-    guild = bot.get_guild(GUILD_ID)
+    guild = bot.get_guild(
+        GUILD_ID
+    )
 
     if guild is None:
         return
@@ -409,7 +431,11 @@ async def update_all_rlp_nicknames():
         return
 
     for member in role.members:
-        await set_rlp_nickname(member)
+        await set_rlp_nickname(
+            member
+        )
+
+        await asyncio.sleep(0.05)
 
 
 # ============================================================
@@ -451,9 +477,9 @@ class NicknamePanelView(
             (
                 "Dein **RLP Nametag** wurde "
                 "erfolgreich entfernt.\n\n"
-                "Wenn die RLP-Rolle später erneut "
-                "vergeben wird, wird das Nametag "
-                "automatisch wieder gesetzt."
+                "Wenn dir die RLP-Rolle später "
+                "neu gegeben wird, wird das "
+                "Nametag automatisch wieder gesetzt."
             ),
             discord.Color.green()
         )
@@ -475,32 +501,20 @@ async def send_nickname_panel():
     ):
         return
 
-    async for message in channel.history(
-        limit=None
-    ):
-
-        if (
-            message.author == bot.user
-            and message.embeds
-            and message.embeds[0].title
-            == "🏷️ Nametag-System"
-        ):
-            await safe_delete(message)
-
-            await asyncio.sleep(
-                0.15
-            )
+    await clean_bot_panel(
+        channel,
+        "🏷️ Nametag-System"
+    )
 
     embed = base_embed(
         "🏷️ Nametag-System",
         (
-            "Hier kannst du dein **RLP Nametag** "
-            "verwalten.\n\n"
-            "Klicke auf **Nametag entfernen**, "
-            "wenn du es nicht mehr verwenden möchtest.\n\n"
-            "Wird die RLP-Rolle später erneut "
-            "vergeben, wird das Nametag automatisch "
-            "wieder aktiviert."
+            "Hier kannst du dein **RLP Nametag** verwalten.\n\n"
+            "🏷️ **Nametag entfernen**\n"
+            "Entfernt `RLP ` aus deinem Namen.\n\n"
+            "🔄 **Automatisch**\n"
+            "Wenn dir die RLP-Rolle später erneut gegeben "
+            "wird, wird das Nametag automatisch wieder gesetzt."
         )
     )
 
@@ -752,18 +766,21 @@ TECH = [
 ]
 
 JOBS = [
+    ("👨‍💻", "Developer"),
     ("👨‍⚕️", "Arzt"),
-    ("👩‍🏫", "Lehrer"),
-    ("👨‍💻", "Programmierer"),
-    ("👮", "Polizist"),
     ("👨‍🚒", "Feuerwehrmann"),
+    ("👮", "Polizist"),
+    ("👨‍🏫", "Lehrer"),
     ("👨‍🍳", "Koch"),
     ("👨‍🔧", "Mechaniker"),
     ("👨‍🎨", "Künstler"),
-    ("👨‍🚀", "Astronaut"),
-    ("👨‍⚖️", "Richter"),
-    ("🧑‍💼", "Bürokraft"),
-    ("🧑‍🔬", "Wissenschaftler"),
+    ("👨‍✈️", "Pilot"),
+    ("👨‍🌾", "Landwirt"),
+    ("🧑‍💼", "Manager"),
+    ("🧑‍⚖️", "Richter"),
+    ("🕵️", "Detektiv"),
+    ("🧑‍🚀", "Astronaut"),
+    ("🎤", "Sänger"),
 ]
 
 OBJECTS = [
@@ -797,7 +814,7 @@ def create_quiz(
     wrong_pool = [
         item
         for item in category
-        if item[1] != correct[1]
+        if item != correct
     ]
 
     wrong = random.sample(
@@ -814,17 +831,13 @@ def create_quiz(
         options
     )
 
-    correct_position = options.index(
-        correct
-    )
-
     return {
         "category": category_name,
         "emoji": correct[0],
         "answer": correct[1],
         "options": options,
         "correct_position":
-            correct_position
+            options.index(correct)
     }
 
 
@@ -846,14 +859,12 @@ def build_quizzes():
     ]
 
     for category_name, category in categories:
-
         amount = min(
             len(category),
             30
         )
 
         for _ in range(amount):
-
             quizzes.append(
                 create_quiz(
                     category_name,
@@ -886,6 +897,9 @@ def refill_quiz_bag():
 async def send_new_quiz(channel):
     global current_quiz
     global current_quiz_message
+
+    if channel is None:
+        return
 
     async with quiz_lock:
 
@@ -931,9 +945,7 @@ class QuizAnswerButton(
         super().__init__(
             label=label,
             style=discord.ButtonStyle.primary,
-            custom_id=(
-                f"quiz_answer_{position}"
-            )
+            custom_id=f"quiz_answer_{position}"
         )
 
         self.position = position
@@ -946,12 +958,10 @@ class QuizAnswerButton(
         global current_quiz_message
 
         if current_quiz is None:
-
             await interaction.response.send_message(
                 "❌ Dieses Quiz ist nicht mehr aktiv.",
                 ephemeral=True
             )
-
             return
 
         if (
@@ -959,68 +969,61 @@ class QuizAnswerButton(
             or interaction.message.id
             != current_quiz_message.id
         ):
-
             await interaction.response.send_message(
                 "❌ Dieses Quiz ist nicht mehr aktiv.",
+                ephemeral=True
+            )
+            return
+
+        quiz = current_quiz
+
+        if self.position != quiz[
+            "correct_position"
+        ]:
+
+            await interaction.response.send_message(
+                "❌ Falsch! Versuch es weiter.",
                 ephemeral=True
             )
 
             return
 
-        quiz = current_quiz
+        user_id = str(
+            interaction.user.id
+        )
 
-        if (
-            self.position
-            == quiz["correct_position"]
-        ):
+        quiz_scores[user_id] = (
+            quiz_scores.get(
+                user_id,
+                0
+            ) + 1
+        )
 
-            user_id = str(
-                interaction.user.id
-            )
+        save_data()
 
-            quiz_scores[user_id] = (
-                quiz_scores.get(
-                    user_id,
-                    0
-                ) + 1
-            )
+        current_quiz = None
 
-            save_data()
+        embed = base_embed(
+            "✅ Richtige Antwort!",
+            (
+                f"{interaction.user.mention} "
+                "hat die richtige Antwort gewählt.\n\n"
+                f"**Antwort:** {quiz['answer']}\n"
+                "**+1 Punkt**"
+            ),
+            discord.Color.green()
+        )
 
-            current_quiz = None
-            current_quiz_message = None
+        await interaction.response.edit_message(
+            embed=embed,
+            view=None
+        )
 
-            embed = base_embed(
-                "✅ Richtige Antwort!",
-                (
-                    f"{interaction.user.mention} "
-                    "hat die richtige Antwort gewählt.\n\n"
-                    f"**Antwort:** {quiz['answer']}\n"
-                    "**+1 Punkt**"
-                ),
-                discord.Color.green()
-            )
+        await asyncio.sleep(3)
 
-            await interaction.response.edit_message(
-                embed=embed,
-                view=None
-            )
-
-            await asyncio.sleep(
-                3
-            )
-
-            if interaction.channel:
-
-                await send_new_quiz(
-                    interaction.channel
-                )
-
-        else:
-
-            await interaction.response.send_message(
-                "❌ Falsch! Versuch es weiter.",
-                ephemeral=True
+        if interaction.channel:
+            await send_new_quiz(
+                interaction.channel
             )
 
 
@@ -1040,20 +1043,17 @@ class QuizHintButton(
         self,
         interaction
     ):
-
         if current_quiz is None:
-
             await interaction.response.send_message(
                 "❌ Kein aktives Quiz.",
                 ephemeral=True
             )
-
             return
 
         await interaction.response.send_message(
             (
-                "💡 Der gesuchte Begriff gehört "
-                f"zur Kategorie **{current_quiz['category']}**."
+                f"💡 Der Begriff gehört zur "
+                f"Kategorie **{current_quiz['category']}**."
             ),
             ephemeral=True
         )
@@ -1076,19 +1076,15 @@ class QuizSkipButton(
         interaction
     ):
         global current_quiz
-        global current_quiz_message
 
         if current_quiz is None:
-
             await interaction.response.send_message(
                 "❌ Kein aktives Quiz.",
                 ephemeral=True
             )
-
             return
 
         current_quiz = None
-        current_quiz_message = None
 
         await interaction.response.edit_message(
             embed=base_embed(
@@ -1099,12 +1095,9 @@ class QuizSkipButton(
             view=None
         )
 
-        await asyncio.sleep(
-            2
-        )
+        await asyncio.sleep(2)
 
         if interaction.channel:
-
             await send_new_quiz(
                 interaction.channel
             )
@@ -1180,6 +1173,23 @@ async def quiz_command(ctx):
 
         return
 
+    if ctx.channel.id != QUIZ_CHANNEL_ID:
+
+        await ctx.send(
+            embed=base_embed(
+                "📍 Falscher Kanal",
+                (
+                    "Der `!quiz`-Command kann "
+                    "nur im vorgesehenen Quiz-Kanal "
+                    "verwendet werden."
+                ),
+                discord.Color.orange()
+            ),
+            delete_after=5
+        )
+
+        return
+
     await send_new_quiz(
         ctx.channel
     )
@@ -1194,7 +1204,7 @@ async def punkte_command(ctx):
     )
 
     embed = base_embed(
-        "📊 Deine Punkte",
+        "📊 Dein Punktestand",
         (
             f"👤 **Spieler:** {ctx.author.mention}\n"
             f"🏆 **Punkte:** `{score}`"
@@ -1267,45 +1277,44 @@ async def top_command(ctx):
 #                         SUPPORT SYSTEM
 # ============================================================
 
-async def create_support_case(
-    member
+async def find_supporter(
+    voice_channel,
+    user_id
 ):
+    """
+    Der erste andere Member im Support-Call
+    wird als Supporter übernommen.
+    """
+
+    if voice_channel is None:
+        return None
+
+    for member in voice_channel.members:
+
+        if member.id == user_id:
+            continue
+
+        if member.bot:
+            continue
+
+        return member
+
+    return None
+
+
+async def create_support_case(member):
+
     if member.id in active_support_cases:
         return
-
-    case_id = generate_case_id()
 
     active_support_cases[
         member.id
     ] = {
-        "case_id": case_id,
+        "case_id": generate_case_id(),
         "user_id": member.id,
         "started_at": now().isoformat(),
         "supporter_id": None
     }
-
-    print(
-        f"[SUPPORT] Neuer Fall "
-        f"{case_id} für {member}"
-    )
-
-
-async def set_supporter(
-    user_id,
-    supporter
-):
-    case = active_support_cases.get(
-        user_id
-    )
-
-    if case is None:
-        return
-
-    if supporter.id == user_id:
-        return
-
-    if case.get("supporter_id") is None:
-        case["supporter_id"] = supporter.id
 
 
 async def finish_support_case(
@@ -1333,23 +1342,19 @@ async def finish_support_case(
         "supporter_id"
     )
 
-    supporter_text = "Nicht festgestellt"
+    supporter_text = (
+        "Nicht festgestellt"
+    )
 
     if supporter_id:
 
-        supporter_member = (
-            member.guild.get_member(
-                supporter_id
-            )
+        supporter_member = member.guild.get_member(
+            int(supporter_id)
         )
 
         if supporter_member:
             supporter_text = (
                 supporter_member.mention
-            )
-        else:
-            supporter_text = (
-                f"<@{supporter_id}>"
             )
 
     channel = bot.get_channel(
@@ -1360,16 +1365,13 @@ async def finish_support_case(
         channel,
         discord.TextChannel
     ):
-        print(
-            "[SUPPORT] Log-Kanal nicht gefunden."
-        )
         return
 
     embed = discord.Embed(
         title="🛡️ Support-Fall beendet",
         description=(
-            f"{member.mention} wurde erfolgreich "
-            "supportet."
+            f"{member.mention} wurde "
+            "erfolgreich supportet."
         ),
         color=discord.Color.green(),
         timestamp=ended_at
@@ -1424,9 +1426,42 @@ async def finish_support_case(
     )
 
 
-# ============================================================
-#                         SUPPORT PANEL
-# ============================================================
+async def update_supporter_for_case(
+    voice_channel
+):
+    if voice_channel is None:
+        return
+
+    for user_id, case in list(
+        active_support_cases.items()
+    ):
+
+        member = voice_channel.guild.get_member(
+            user_id
+        )
+
+        if member is None:
+            continue
+
+        if member not in voice_channel.members:
+            continue
+
+        if case.get("supporter_id"):
+            continue
+
+        supporter = await find_supporter(
+            voice_channel,
+            user_id
+        )
+
+        if supporter:
+
+            case["supporter_id"] = supporter.id
+
+            active_support_cases[
+                user_id
+            ] = case
+
 
 class SupportView(
     discord.ui.View
@@ -1452,16 +1487,14 @@ class SupportView(
         embed = base_embed(
             "🎫 Support-System",
             (
-                "Willkommen im Support-Bereich.\n\n"
-                "Betritt den **Support-Call**, um "
-                "Unterstützung zu erhalten.\n\n"
-                "Beim Betreten wird automatisch eine "
-                "**CaseID** erstellt.\n\n"
-                "Der erste weitere Teilnehmer wird "
-                "automatisch als Supporter erkannt.\n\n"
-                "Beim Verlassen des Calls wird der Fall "
-                "mit Nutzer, Supporter, Startzeit und "
-                "Dauer dokumentiert."
+                "Willkommen im Support-System.\n\n"
+                "1. Betritt den Support-Call.\n"
+                "2. Dein Support-Fall wird automatisch erstellt.\n"
+                "3. Eine eindeutige CaseID wird vergeben.\n"
+                "4. Der Supporter wird erfasst.\n"
+                "5. Beim Verlassen wird der Fall automatisch abgeschlossen.\n\n"
+                "Der Abschluss wird mit Nutzer, Supporter, "
+                "Erstellungszeit, Dauer und CaseID dokumentiert."
             )
         )
 
@@ -1483,38 +1516,23 @@ async def send_support_panel():
     ):
         return
 
-    async for message in channel.history(
-        limit=None
-    ):
-
-        if (
-            message.author == bot.user
-            and message.embeds
-            and message.embeds[0].title
-            == "🎫 Support-System"
-        ):
-
-            await safe_delete(
-                message
-            )
-
-            await asyncio.sleep(
-                0.15
-            )
+    await clean_bot_panel(
+        channel,
+        "🎫 Support-System"
+    )
 
     embed = base_embed(
         "🎫 Support-System",
         (
-            "Willkommen im offiziellen "
-            "Support-Bereich.\n\n"
-            "🎙️ **Support starten**\n"
+            "Willkommen im offiziellen Support-System.\n\n"
+            "📞 **Support starten**\n"
             "Betritt den vorgesehenen Support-Call.\n\n"
-            "🆔 Beim Start wird automatisch eine "
-            "**CaseID** erstellt.\n\n"
-            "🛠️ Sobald ein Teammitglied dem Call "
-            "beitritt, wird es als Supporter erfasst.\n\n"
-            "🔒 Beim Verlassen wird der Support-Fall "
-            "automatisch abgeschlossen."
+            "🆔 **Automatische CaseID**\n"
+            "Für jeden Fall wird eine eindeutige CaseID erstellt.\n\n"
+            "⏱️ **Automatische Dauer**\n"
+            "Die Supportdauer wird automatisch erfasst.\n\n"
+            "📋 **Abschlussbericht**\n"
+            "Nach Ende des Falls wird ein sauberer Bericht erstellt."
         )
     )
 
@@ -1598,59 +1616,49 @@ class TeamRegistrationView(
         )
 
     @discord.ui.button(
-        label="Status prüfen",
-        emoji="📋",
+        label="Team anzeigen",
+        emoji="👥",
         style=discord.ButtonStyle.secondary,
-        custom_id="team_status"
+        custom_id="team_list"
     )
-    async def status(
+    async def list_team(
         self,
         interaction,
         button
     ):
 
-        if not active_team_members:
+        guild = interaction.guild
 
-            text = (
+        if guild is None:
+            return
+
+        members = []
+
+        for user_id in active_team_members:
+
+            member = guild.get_member(
+                user_id
+            )
+
+            if member:
+                members.append(
+                    f"🟢 {member.mention}"
+                )
+
+        if not members:
+            description = (
                 "Aktuell ist kein Teamler "
                 "als verfügbar eingetragen."
             )
-
         else:
-
-            mentions = []
-
-            for user_id in list(
-                active_team_members
-            ):
-
-                member = (
-                    interaction.guild.get_member(
-                        user_id
-                    )
-                    if interaction.guild
-                    else None
-                )
-
-                if member:
-                    mentions.append(
-                        member.mention
-                    )
-
-            if mentions:
-                text = "\n".join(
-                    mentions
-                )
-            else:
-                text = (
-                    "Aktuell ist kein verfügbarer "
-                    "Teamler online."
-                )
+            description = "\n".join(
+                members[:25]
+            )
 
         await interaction.response.send_message(
             embed=base_embed(
                 "👥 Verfügbare Teamler",
-                text
+                description
             ),
             ephemeral=True
         )
@@ -1668,36 +1676,22 @@ async def send_team_registration_panel():
     ):
         return
 
-    async for message in channel.history(
-        limit=None
-    ):
-
-        if (
-            message.author == bot.user
-            and message.embeds
-            and message.embeds[0].title
-            == "👥 Teamler-System"
-        ):
-
-            await safe_delete(
-                message
-            )
-
-            await asyncio.sleep(
-                0.15
-            )
+    await clean_bot_panel(
+        channel,
+        "👥 Teamler-System"
+    )
 
     embed = base_embed(
         "👥 Teamler-System",
         (
-            "Hier kannst du deinen Team-Status "
+            "Hier kannst du deinen aktuellen Team-Status "
             "selbst verwalten.\n\n"
             "🟢 **Eintragen**\n"
             "Du bist aktuell verfügbar.\n\n"
             "🔴 **Austragen**\n"
             "Du bist aktuell nicht verfügbar.\n\n"
-            "📋 **Status prüfen**\n"
-            "Zeigt dir die aktuell verfügbaren Teamler."
+            "👥 **Team anzeigen**\n"
+            "Zeigt die aktuell eingetragenen Teamler."
         )
     )
 
@@ -1758,8 +1752,9 @@ class DeveloperShiftView(
             embed=base_embed(
                 "🟢 Schicht gestartet",
                 (
-                    f"{interaction.user.mention}, "
-                    "deine Developer-Schicht wurde gestartet."
+                    f"{interaction.user.mention}\n\n"
+                    "Deine Developer-Schicht wurde "
+                    "erfolgreich gestartet."
                 ),
                 discord.Color.green()
             ),
@@ -1795,9 +1790,14 @@ class DeveloperShiftView(
 
             return
 
-        started_at = datetime.fromisoformat(
-            shift["started_at"]
-        )
+        try:
+            started_at = datetime.fromisoformat(
+                shift["started_at"]
+            )
+
+        except Exception:
+
+            started_at = now()
 
         duration = (
             now() - started_at
@@ -1835,24 +1835,10 @@ async def send_developer_shift_panel():
     ):
         return
 
-    async for message in channel.history(
-        limit=None
-    ):
-
-        if (
-            message.author == bot.user
-            and message.embeds
-            and message.embeds[0].title
-            == "💻 Developer-Schichtsystem"
-        ):
-
-            await safe_delete(
-                message
-            )
-
-            await asyncio.sleep(
-                0.15
-            )
+    await clean_bot_panel(
+        channel,
+        "💻 Developer-Schichtsystem"
+    )
 
     embed = base_embed(
         "💻 Developer-Schichtsystem",
@@ -1861,8 +1847,7 @@ async def send_developer_shift_panel():
             "🟢 **Schicht starten**\n"
             "Startet deine Arbeitszeit.\n\n"
             "🔴 **Schicht beenden**\n"
-            "Beendet deine Arbeitszeit und zeigt "
-            "die Dauer an."
+            "Beendet deine Arbeitszeit und zeigt die Dauer an."
         )
     )
 
@@ -1884,6 +1869,14 @@ def get_next_task_id():
         int(task.get("id", 0))
         for task in developer_tasks
     ) + 1
+
+
+def find_task(task_id):
+    for task in developer_tasks:
+        if int(task.get("id", 0)) == task_id:
+            return task
+
+    return None
 
 
 class DeveloperTaskModal(
@@ -1913,7 +1906,9 @@ class DeveloperTaskModal(
                 "creator_id":
                     interaction.user.id,
                 "completed": False,
-                "claimed_by": None
+                "claimed_by": None,
+                "created_at":
+                    now().isoformat()
             }
         )
 
@@ -1959,6 +1954,31 @@ class DeveloperTaskView(
             DeveloperTaskModal()
         )
 
+    @discord.ui.button(
+        label="Aufgabe übernehmen",
+        emoji="📌",
+        style=discord.ButtonStyle.primary,
+        custom_id="developer_task_claim_info"
+    )
+    async def claim_info(
+        self,
+        interaction,
+        button
+    ):
+
+        await interaction.response.send_message(
+            embed=base_embed(
+                "📌 Aufgabe übernehmen",
+                (
+                    "Nutze:\n"
+                    "`!devclaim <Aufgaben-ID>`\n\n"
+                    "Beispiel:\n"
+                    "`!devclaim 4`"
+                )
+            ),
+            ephemeral=True
+        )
+
 
 async def send_developer_tasks():
 
@@ -1972,91 +1992,88 @@ async def send_developer_tasks():
     ):
         return
 
-    async for message in channel.history(
-        limit=None
-    ):
-
-        if (
-            message.author == bot.user
-            and message.embeds
-            and message.embeds[0].title
-            == "💻 Developer-Aufgaben"
-        ):
-
-            await safe_delete(
-                message
-            )
-
-            await asyncio.sleep(
-                0.15
-            )
+    await clean_bot_panel(
+        channel,
+        "💻 Developer-Aufgaben"
+    )
 
     embed = base_embed(
         "💻 Developer-Aufgaben",
         (
-            "Hier werden die aktuellen "
-            "Developer-Aufgaben verwaltet.\n\n"
-            "➕ Neue Aufgaben können über den "
-            "Button erstellt werden.\n"
-            "🛠️ Administratoren können Aufgaben "
-            "über Commands verwalten."
+            "Hier werden die aktuellen Developer-Aufgaben "
+            "übersichtlich verwaltet.\n\n"
+            "➕ `!devtask <Aufgabe>` — Aufgabe erstellen\n"
+            "📌 `!devclaim <ID>` — Aufgabe übernehmen\n"
+            "✅ `!devdone <ID>` — Aufgabe abschließen"
         )
     )
+
+    open_tasks = [
+        task
+        for task in developer_tasks
+        if not task.get("completed", False)
+    ]
+
+    completed_tasks = [
+        task
+        for task in developer_tasks
+        if task.get("completed", False)
+    ]
 
     if not developer_tasks:
 
         embed.add_field(
             name="📋 Keine Aufgaben",
             value=(
-                "Aktuell sind keine Aufgaben vorhanden."
+                "Aktuell sind keine Developer-Aufgaben vorhanden."
             ),
             inline=False
         )
 
     else:
 
-        open_tasks = [
-            task
-            for task in developer_tasks
-            if not task.get("completed")
-        ]
+        for task in developer_tasks[-15:]:
 
-        completed_tasks = [
-            task
-            for task in developer_tasks
-            if task.get("completed")
-        ]
+            if task.get("completed"):
+                status = "✅ Erledigt"
+            elif task.get("claimed_by"):
+                status = "🟡 In Bearbeitung"
+            else:
+                status = "⚪ Offen"
 
-        if open_tasks:
-
-            for task in open_tasks[-10:]:
-
+            if task.get("claimed_by"):
                 claimed = (
                     f"<@{task['claimed_by']}>"
-                    if task.get("claimed_by")
-                    else "Niemand"
                 )
+            else:
+                claimed = "Niemand"
 
-                embed.add_field(
-                    name=(
-                        f"🟡 #{task['id']}"
-                    ),
-                    value=(
-                        f"{task['text']}\n"
-                        f"👤 Bearbeiter: {claimed}"
-                    ),
-                    inline=False
+            text = str(
+                task.get(
+                    "text",
+                    "Keine Beschreibung"
                 )
-
-        if completed_tasks:
+            )
 
             embed.add_field(
-                name="✅ Abgeschlossene Aufgaben",
-                value=(
-                    f"{len(completed_tasks)} Aufgabe(n) abgeschlossen."
+                name=(
+                    f"#{task['id']} • {status}"
                 ),
+                value=(
+                    f"{text}\n"
+                    f"👤 Bearbeiter: {claimed}"
+                )[:1024],
                 inline=False
             )
+
+    embed.add_field(
+        name="📊 Übersicht",
+        value=(
+            f"⚪ Offen: `{len(open_tasks)}`\n"
+            f"✅ Erledigt: `{len(completed_tasks)}`"
+        ),
+        inline=False
+    )
 
     await channel.send(
         embed=embed,
@@ -2071,8 +2088,19 @@ async def send_developer_tasks():
 async def devtask_command(
     ctx,
     *,
-    task
+    task: str
 ):
+
+    task = task.strip()
+
+    if not task:
+
+        await ctx.send(
+            "❌ Bitte gib eine Aufgabe an.",
+            delete_after=5
+        )
+
+        return
 
     task_id = get_next_task_id()
 
@@ -2083,7 +2111,9 @@ async def devtask_command(
             "creator_id":
                 ctx.author.id,
             "completed": False,
-            "claimed_by": None
+            "claimed_by": None,
+            "created_at":
+                now().isoformat()
         }
     )
 
@@ -2103,82 +2133,123 @@ async def devclaim_command(
     task_id: int
 ):
 
-    for task in developer_tasks:
+    task = find_task(
+        task_id
+    )
 
-        if int(task["id"]) == task_id:
+    if task is None:
 
-            if task.get("completed"):
+        await ctx.send(
+            "❌ Diese Aufgabe wurde nicht gefunden.",
+            delete_after=5
+        )
 
-                await ctx.send(
-                    "❌ Diese Aufgabe ist bereits abgeschlossen.",
-                    delete_after=5
-                )
+        return
 
-                return
+    if task.get("completed"):
 
-            task["claimed_by"] = (
-                ctx.author.id
-            )
+        await ctx.send(
+            "⚠️ Diese Aufgabe ist bereits abgeschlossen.",
+            delete_after=5
+        )
 
-            save_data()
+        return
 
-            await send_developer_tasks()
+    if task.get("claimed_by"):
 
-            await ctx.send(
-                embed=base_embed(
-                    "🛠️ Aufgabe übernommen",
-                    (
-                        f"{ctx.author.mention} hat "
-                        f"Aufgabe **#{task_id}** übernommen."
-                    ),
-                    discord.Color.green()
-                ),
-                delete_after=5
-            )
+        await ctx.send(
+            (
+                "⚠️ Diese Aufgabe wird bereits von "
+                f"<@{task['claimed_by']}> bearbeitet."
+            ),
+            delete_after=5
+        )
 
-            return
+        return
+
+    task["claimed_by"] = ctx.author.id
+
+    save_data()
+
+    await send_developer_tasks()
 
     await ctx.send(
-        "❌ Diese Aufgabe wurde nicht gefunden.",
+        embed=base_embed(
+            "📌 Aufgabe übernommen",
+            (
+                f"{ctx.author.mention} hat "
+                f"**Aufgabe #{task_id}** übernommen."
+            ),
+            discord.Color.blurple()
+        ),
         delete_after=5
     )
 
 
 @bot.command(name="devdone")
-@commands.has_permissions(
-    administrator=True
-)
 async def devdone_command(
     ctx,
     task_id: int
 ):
 
-    for task in developer_tasks:
+    task = find_task(
+        task_id
+    )
 
-        if int(task["id"]) == task_id:
+    if task is None:
 
-            task["completed"] = True
+        await ctx.send(
+            "❌ Diese Aufgabe wurde nicht gefunden.",
+            delete_after=5
+        )
 
-            save_data()
+        return
 
-            await send_developer_tasks()
+    if task.get("completed"):
 
-            await ctx.send(
-                embed=base_embed(
-                    "✅ Aufgabe abgeschlossen",
-                    (
-                        f"Developer-Aufgabe **#{task_id}** "
-                        "wurde abgeschlossen."
-                    ),
-                    discord.Color.green()
-                ),
-                delete_after=5
-            )
+        await ctx.send(
+            "⚠️ Diese Aufgabe ist bereits abgeschlossen.",
+            delete_after=5
+        )
 
-            return
+        return
+
+    # Nur Administratoren oder der aktuelle Bearbeiter
+    # dürfen eine Aufgabe abschließen.
+    claimed_by = task.get(
+        "claimed_by"
+    )
+
+    if (
+        not ctx.author.guild_permissions.administrator
+        and claimed_by != ctx.author.id
+    ):
+
+        await ctx.send(
+            (
+                "🔒 Du kannst diese Aufgabe nicht "
+                "abschließen. Übernimm sie zuerst."
+            ),
+            delete_after=5
+        )
+
+        return
+
+    task["completed"] = True
+
+    save_data()
+
+    await send_developer_tasks()
 
     await ctx.send(
-        "❌ Diese Aufgabe wurde nicht gefunden.",
+        embed=base_embed(
+            "✅ Aufgabe abgeschlossen",
+            (
+                f"**Aufgabe #{task_id}** wurde von "
+                f"{ctx.author.mention} abgeschlossen."
+            ),
+            discord.Color.green()
+        ),
         delete_after=5
     )
 
@@ -2242,8 +2313,9 @@ class DeveloperApplicationView(
 
             await interaction.followup.send(
                 (
-                    "❌ Ich konnte dir keine DM schicken. "
-                    "Bitte aktiviere deine Direktnachrichten."
+                    "❌ Ich konnte dir keine DM schicken.\n"
+                    "Bitte aktiviere deine Direktnachrichten "
+                    "für diesen Server."
                 ),
                 ephemeral=True
             )
@@ -2266,9 +2338,8 @@ async def run_developer_application(
                 "💻 Developer-Bewerbung",
                 (
                     "Willkommen bei der Developer-Bewerbung.\n\n"
-                    "Beantworte bitte die folgenden Fragen "
-                    "nacheinander.\n\n"
-                    "Du hast pro Frage **5 Minuten** Zeit."
+                    "Beantworte bitte alle Fragen nacheinander.\n"
+                    "Für jede Antwort hast du 5 Minuten Zeit."
                 )
             )
         )
@@ -2289,10 +2360,8 @@ async def run_developer_application(
             )
 
             def check(message):
-
                 return (
-                    message.author.id
-                    == user.id
+                    message.author.id == user.id
                     and isinstance(
                         message.channel,
                         discord.DMChannel
@@ -2385,15 +2454,8 @@ async def send_application_review(
         start=1
     ):
 
-        answer = answer.strip()
-
-        if not answer:
-            answer = "Keine Antwort"
-
         embed.add_field(
-            name=(
-                f"{index}. {question}"
-            ),
+            name=f"{index}. {question}",
             value=answer[:1024],
             inline=False
         )
@@ -2415,34 +2477,18 @@ async def send_application_panel():
     ):
         return
 
-    async for message in channel.history(
-        limit=None
-    ):
-
-        if (
-            message.author == bot.user
-            and message.embeds
-            and message.embeds[0].title
-            == "💻 Developer-Bewerbung"
-        ):
-
-            await safe_delete(
-                message
-            )
-
-            await asyncio.sleep(
-                0.15
-            )
+    await clean_bot_panel(
+        channel,
+        "💻 Developer-Bewerbung"
+    )
 
     embed = base_embed(
         "💻 Developer-Bewerbung",
         (
-            "Du möchtest unser Developer-Team "
-            "unterstützen?\n\n"
-            "Klicke auf **Developer bewerben** "
-            "und fülle die Bewerbung per DM aus.\n\n"
-            "Bitte beantworte alle Fragen ehrlich "
-            "und ausführlich."
+            "Du möchtest unser Developer-Team unterstützen?\n\n"
+            "Klicke auf **Developer bewerben** und fülle "
+            "die Bewerbung per DM aus.\n\n"
+            "Bitte beantworte alle Fragen ehrlich und ausführlich."
         )
     )
 
@@ -2460,7 +2506,9 @@ class RLPBot(
     commands.Bot
 ):
 
-    async def setup_hook(self):
+    async def setup_hook(
+        self
+    ):
 
         load_data()
 
@@ -2537,15 +2585,15 @@ async def on_ready():
 
         refill_quiz_bag()
 
-        # ----------------------------------------
-        # NAMETAGS
-        # ----------------------------------------
+        # -------------------------
+        # RLP Nametags
+        # -------------------------
 
         await update_all_rlp_nicknames()
 
-        # ----------------------------------------
-        # QUIZ
-        # ----------------------------------------
+        # -------------------------
+        # Quiz
+        # -------------------------
 
         quiz_channel = bot.get_channel(
             QUIZ_CHANNEL_ID
@@ -2567,16 +2615,16 @@ async def on_ready():
                     )
 
                     await asyncio.sleep(
-                        0.08
+                        0.05
                     )
 
             await send_new_quiz(
                 quiz_channel
             )
 
-        # ----------------------------------------
-        # PANELS
-        # ----------------------------------------
+        # -------------------------
+        # Panels
+        # -------------------------
 
         await send_nickname_panel()
 
@@ -2590,45 +2638,14 @@ async def on_ready():
 
         await send_support_panel()
 
-        # ----------------------------------------
-        # SUPPORT-FÄLLE REKONSTRUIEREN
-        # ----------------------------------------
-
-        support_voice = bot.get_channel(
-            SUPPORT_VOICE_CHANNEL_ID
-        )
-
-        if isinstance(
-            support_voice,
-            discord.VoiceChannel
-        ):
-
-            for member in support_voice.members:
-
-                if member.id not in active_support_cases:
-
-                    await create_support_case(
-                        member
-                    )
-
         startup_finished = True
 
         print(
-            "✅ System vollständig geladen."
+            "✅ Alle Systeme wurden erfolgreich geladen."
         )
 
         print(
             f"🧩 Quiz-Fragen: {len(QUIZZES)}"
-        )
-
-        print(
-            f"👥 Verfügbare Teamler: "
-            f"{len(active_team_members)}"
-        )
-
-        print(
-            f"📋 Developer-Aufgaben: "
-            f"{len(developer_tasks)}"
         )
 
     except Exception as error:
@@ -2637,6 +2654,8 @@ async def on_ready():
             f"❌ Fehler beim Startup: {error}"
         )
 
+        # Bleibt False, damit ein späterer Ready-
+        # Event einen erneuten Startversuch machen kann.
         startup_finished = False
 
 
@@ -2648,9 +2667,7 @@ async def on_member_join(
     if member.guild.id != GUILD_ID:
         return
 
-    await asyncio.sleep(
-        2
-    )
+    await asyncio.sleep(2)
 
     await set_rlp_nickname(
         member,
@@ -2667,26 +2684,40 @@ async def on_member_update(
     if before.guild.id != GUILD_ID:
         return
 
-    role_before = any(
+    before_has_role = any(
         role.id == NAMETAG_ROLE_ID
         for role in before.roles
     )
 
-    role_after = any(
+    after_has_role = any(
         role.id == NAMETAG_ROLE_ID
         for role in after.roles
     )
 
     # Rolle neu bekommen
     if (
-        not role_before
-        and role_after
+        not before_has_role
+        and after_has_role
     ):
 
         await set_rlp_nickname(
             after,
             force=True
         )
+
+    # Rolle verloren -> Opt-Out entfernen,
+    # damit die Rolle bei späterer Vergabe wieder greift.
+    if (
+        before_has_role
+        and not after_has_role
+    ):
+
+        if after.id in nametag_removed_users:
+            nametag_removed_users.discard(
+                after.id
+            )
+
+            save_data()
 
 
 @bot.event
@@ -2700,83 +2731,59 @@ async def on_voice_state_update(
         return
 
     # ========================================================
-    # SUPPORT CALL BETRETEN
+    # Support betreten
     # ========================================================
 
-    entered_support = (
+    joined_support = (
         after.channel is not None
         and after.channel.id
         == SUPPORT_VOICE_CHANNEL_ID
-        and (
-            before.channel is None
-            or before.channel.id
-            != SUPPORT_VOICE_CHANNEL_ID
-        )
     )
-
-    if entered_support:
-
-        # Wenn bereits ein aktiver Fall existiert,
-        # ist der neue Teilnehmer vermutlich der Supporter.
-        if active_support_cases:
-
-            for user_id in list(
-                active_support_cases.keys()
-            ):
-
-                case = active_support_cases[
-                    user_id
-                ]
-
-                if (
-                    user_id != member.id
-                    and case.get(
-                        "supporter_id"
-                    ) is None
-                ):
-
-                    await set_supporter(
-                        user_id,
-                        member
-                    )
-
-                    break
-
-        else:
-
-            await create_support_case(
-                member
-            )
-
-    # ========================================================
-    # SUPPORT CALL VERLASSEN
-    # ========================================================
 
     left_support = (
         before.channel is not None
         and before.channel.id
         == SUPPORT_VOICE_CHANNEL_ID
-        and (
-            after.channel is None
-            or after.channel.id
-            != SUPPORT_VOICE_CHANNEL_ID
-        )
     )
+
+    if joined_support:
+
+        # Nur normale Nutzer erhalten einen neuen Case.
+        if member.id not in active_support_cases:
+
+            await create_support_case(
+                member
+            )
+
+        # Prüfen, ob bereits ein anderer Nutzer
+        # als Supporter im Call ist.
+        await update_supporter_for_case(
+            after.channel
+        )
+
+    # ========================================================
+    # Support verlassen
+    # ========================================================
 
     if left_support:
 
-        # Wenn der Nutzer seinen eigenen Support-Fall verlässt
+        # Wenn der Fall-Nutzer den Call verlässt,
+        # wird sein Case abgeschlossen.
         if member.id in active_support_cases:
 
             await finish_support_case(
                 member
             )
 
-            return
+        # Wenn ein Supporter beitritt/verlassen hat,
+        # bleiben die Cases anderer Nutzer bestehen.
+        # Danach prüfen wir erneut, ob ein anderer
+        # Supporter vorhanden ist.
+        if after.channel is not None:
 
-        # Falls ein Supporter den Call verlässt,
-        # bleibt der Fall bestehen.
-        # Ein neuer Supporter kann später erkannt werden.
+            await update_supporter_for_case(
+                after.channel
+            )
 
 
 # ============================================================
@@ -2821,10 +2828,10 @@ async def on_command_error(
 
         await ctx.send(
             embed=base_embed(
-                "❌ Fehlender Parameter",
+                "❌ Fehlende Eingabe",
                 (
-                    "Bitte gib alle erforderlichen "
-                    "Parameter an."
+                    "Für diesen Command fehlt "
+                    "eine benötigte Eingabe."
                 ),
                 discord.Color.red()
             ),
@@ -2878,7 +2885,6 @@ async def on_message(
 # ============================================================
 
 if not DISCORD_TOKEN:
-
     raise RuntimeError(
         "DISCORD_TOKEN wurde nicht gefunden."
     )
@@ -2887,3 +2893,20 @@ if not DISCORD_TOKEN:
 bot.run(
     DISCORD_TOKEN
 )
+```
+
+**Wichtig:** Deinen bisherigen `bot.py` komplett löschen und **genau diesen Inhalt** als neuen `bot.py` einsetzen. Die `DISCORD_TOKEN`-Umgebungsvariable bleibt wie bisher.
+
+Die wichtigsten Commands sind jetzt:
+
+```text
+!quiz
+!punkte
+!top
+
+!devtask <Aufgabe>
+!devclaim <ID>
+!devdone <ID>
+```
+
+`!quiz` ist ausschließlich für die Rolle `1530188150456979526` freigeschaltet. `!top` und `!punkte` bleiben für alle nutzbar.
