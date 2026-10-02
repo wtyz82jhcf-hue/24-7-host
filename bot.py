@@ -6,14 +6,14 @@ import discord
 
 
 # ============================================================
-# KANÄLE / ROLLEN
+# KANÄLE
 # ============================================================
 
 QUIZ_CHANNEL_ID = 1533409789256925185
-APPLICATION_CHANNEL_ID = 1541391365219295343
-REVIEW_CHANNEL_ID = 1548404201493762181
 
-DEVELOPER_ROLE_ID = 1541393345295683634
+APPLICATION_CHANNEL_ID = 1541391365219295343
+
+REVIEW_CHANNEL_ID = 1548404201493762181
 
 
 # ============================================================
@@ -28,19 +28,20 @@ QUIZZES = [
     (["🐰", "🥕"], "Hase"),
     (["🐵", "🍌"], "Affe"),
     (["🐼", "🎋"], "Panda"),
-    (["🦁", "🌿"], "Löwe"),
+    (["🦁", "👑"], "Löwe"),
     (["🐯", "🌴"], "Tiger"),
     (["🐘", "🌳"], "Elefant"),
     (["🦒", "🌳"], "Giraffe"),
     (["🐴", "🏇"], "Pferd"),
     (["🐮", "🥛"], "Kuh"),
-    (["🐷", "🐖"], "Schwein"),
+    (["🐷", "🌾"], "Schwein"),
     (["🐔", "🥚"], "Huhn"),
     (["🐸", "💧"], "Frosch"),
     (["🐢", "🏁"], "Schildkröte"),
     (["🐍", "🌿"], "Schlange"),
     (["🦋", "🌸"], "Schmetterling"),
     (["🐝", "🍯"], "Biene"),
+    (["🐞", "🌿"], "Marienkäfer"),
     (["🦊", "🌲"], "Fuchs"),
     (["🐻", "🍯"], "Bär"),
     (["🐺", "🌙"], "Wolf"),
@@ -52,6 +53,7 @@ QUIZZES = [
     (["🐙", "🌊"], "Oktopus"),
     (["🦀", "🏖️"], "Krabbe"),
     (["🐠", "🌊"], "Fisch"),
+
     (["🍎", "🍏"], "Apfel"),
     (["🍌", "🍎"], "Banane"),
     (["🍓", "🍒"], "Beeren"),
@@ -63,6 +65,7 @@ QUIZZES = [
     (["🥕", "🐰"], "Karotte"),
     (["🌽", "🌾"], "Mais"),
     (["🍅", "🥗"], "Salat"),
+
     (["🍔", "🍟"], "Fast Food"),
     (["🌭", "🥤"], "Hotdog"),
     (["🍿", "🎬"], "Kino"),
@@ -74,10 +77,16 @@ QUIZZES = [
     (["🍝", "🍅"], "Nudeln"),
     (["🍣", "🥢"], "Sushi"),
     (["🌮", "🌶️"], "Taco"),
+    (["🍳", "🥓"], "Frühstück"),
+    (["🥪", "🥤"], "Mittagessen"),
+    (["☕", "🥐"], "Frühstück"),
+
     (["🎂", "🎁"], "Geburtstag"),
     (["🎈", "🎉"], "Party"),
     (["🎄", "🎁"], "Weihnachten"),
     (["🎃", "👻"], "Halloween"),
+    (["❤️", "🌹"], "Liebe"),
+    (["💐", "🌷"], "Blumen"),
     (["😊", "❤️"], "Glück"),
     (["😂", "🤣"], "Lachen"),
     (["😭", "💧"], "Weinen"),
@@ -87,23 +96,28 @@ QUIZZES = [
     (["⏰", "😴"], "Wecker"),
     (["🚿", "🧼"], "Duschen"),
     (["🪥", "😁"], "Zähneputzen"),
-    (["🏃", "👟"], "Laufen"),
+
+    (["👟", "🏃"], "Laufen"),
     (["🏊", "🌊"], "Schwimmen"),
     (["🚴", "🚲"], "Radfahren"),
     (["🏋️", "💪"], "Fitness"),
+
     (["⚽", "🥅"], "Fußball"),
     (["🏀", "🏆"], "Basketball"),
     (["🏐", "🏆"], "Volleyball"),
     (["🎾", "🏟️"], "Tennis"),
     (["🥊", "🏆"], "Boxen"),
     (["🏎️", "🏁"], "Rennen"),
+    (["🎯", "🏆"], "Gewinnen"),
     (["🥇", "🏆"], "Sieger"),
+
     (["🎸", "🎤"], "Musik"),
     (["🥁", "🎵"], "Schlagzeug"),
     (["🎹", "🎼"], "Klavier"),
     (["🎨", "🖌️"], "Malen"),
     (["📖", "🔦"], "Lesen"),
     (["✏️", "📓"], "Schreiben"),
+    (["📷", "🤳"], "Foto"),
     (["🎧", "🎵"], "Musik"),
     (["📺", "🍿"], "Fernsehen"),
     (["🎮", "🕹️"], "Gaming"),
@@ -111,11 +125,13 @@ QUIZZES = [
     (["📱", "💬"], "Chat"),
     (["📧", "💻"], "E-Mail"),
     (["📞", "📱"], "Anruf"),
+
     (["🔑", "🚪"], "Schlüssel"),
     (["🔒", "🔑"], "Schloss"),
     (["💰", "🏦"], "Geld"),
     (["💎", "💰"], "Reichtum"),
     (["🎁", "🎀"], "Geschenk"),
+
     (["🚗", "⛽"], "Auto"),
     (["🚕", "🏙️"], "Taxi"),
     (["🚌", "🚏"], "Bus"),
@@ -130,6 +146,7 @@ QUIZZES = [
     (["✈️", "🧳"], "Flugzeug"),
     (["🚀", "🌕"], "Weltraum"),
     (["🏴‍☠️", "🚢"], "Piraten"),
+
     (["👑", "🏰"], "König"),
     (["🏰", "⚔️"], "Burg"),
     (["🗺️", "🧳"], "Reise"),
@@ -143,6 +160,7 @@ QUIZZES = [
     (["🏜️", "🐪"], "Wüste"),
     (["🌲", "🏡"], "Wald"),
     (["🌋", "🔥"], "Vulkan"),
+
     (["🌞", "🌻"], "Sommer"),
     (["❄️", "⛄"], "Winter"),
     (["🍂", "🌳"], "Herbst"),
@@ -153,6 +171,7 @@ QUIZZES = [
     (["🌳", "🍎"], "Apfelbaum"),
     (["🌻", "🌞"], "Sonnenblume"),
     (["🌹", "❤️"], "Rose"),
+
     (["🎓", "📚"], "Abschluss"),
     (["🔬", "🧪"], "Wissenschaft"),
     (["🧑‍🍳", "🍳"], "Kochen"),
@@ -178,12 +197,15 @@ QUIZZES = [
     (["🔔", "📱"], "Benachrichtigung"),
     (["🎟️", "🎬"], "Kinokarte"),
     (["🎁", "🎉"], "Feier"),
-    (["🎊", "🎉"], "Feier"),
+    (["🕯️", "🎂"], "Geburtstag"),
+    (["💍", "❤️"], "Hochzeit"),
+    (["💌", "❤️"], "Liebesbrief"),
+    (["🌹", "💌"], "Valentinstag"),
 ]
 
 
 # ============================================================
-# DEVELOPER-FRAGEN
+# DEVELOPER-BEWERBUNG - 9 FRAGEN
 # ============================================================
 
 DEVELOPER_QUESTIONS = [
@@ -200,16 +222,15 @@ DEVELOPER_QUESTIONS = [
 
 
 # ============================================================
-# INTENTS
+# DISCORD
 # ============================================================
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True
 
 
 # ============================================================
-# VARIABLEN
+# GLOBALE VARIABLEN
 # ============================================================
 
 current_quiz = None
@@ -219,13 +240,17 @@ last_result_messages = {}
 
 active_applications = set()
 
+quiz_lock = asyncio.Lock()
+
 quiz_bag = []
 
 last_quiz_emojis = set()
 
 startup_finished = False
 
-quiz_lock = asyncio.Lock()
+# Für jeden User eigene Zähler
+skip_counts = {}
+hint_counts = {}
 
 
 # ============================================================
@@ -233,6 +258,7 @@ quiz_lock = asyncio.Lock()
 # ============================================================
 
 def normalize(text):
+
     text = text.lower().strip()
 
     replacements = {
@@ -245,64 +271,156 @@ def normalize(text):
     for old, new in replacements.items():
         text = text.replace(old, new)
 
-    return re.sub(r"[^a-z0-9]+", "", text)
+    text = re.sub(
+        r"[^a-z0-9]+",
+        "",
+        text
+    )
+
+    return text
 
 
 async def safe_delete(message):
+
     if message is None:
         return
 
     try:
+
         await message.delete()
+
     except discord.NotFound:
         pass
+
     except discord.Forbidden:
-        print("❌ Keine Berechtigung zum Löschen.")
+
+        print(
+            "❌ Keine Berechtigung zum Löschen."
+        )
+
     except discord.HTTPException as error:
-        print(f"❌ Fehler beim Löschen: {error}")
+
+        print(
+            f"❌ Fehler beim Löschen: {error}"
+        )
 
 
-async def delete_previous_result(user, channel):
-    old_message = last_result_messages.get(user.id)
+async def delete_previous_result(
+    user,
+    channel
+):
 
-    if old_message:
-        await safe_delete(old_message)
-        last_result_messages.pop(user.id, None)
+    user_id = user.id
+
+    old_message = last_result_messages.get(
+        user_id
+    )
+
+    if old_message is not None:
+
+        await safe_delete(
+            old_message
+        )
+
+        last_result_messages.pop(
+            user_id,
+            None
+        )
+
+        return
+
+    try:
+
+        async for message in channel.history(
+            limit=100
+        ):
+
+            if message.author != bot.user:
+                continue
+
+            if user.mention not in message.content:
+                continue
+
+            if (
+                message.content.startswith("✅")
+                or message.content.startswith("❌")
+            ):
+
+                await safe_delete(
+                    message
+                )
+
+                return
+
+    except discord.Forbidden:
+
+        print(
+            "❌ Keine Berechtigung zum Lesen des Verlaufs."
+        )
 
 
 # ============================================================
-# QUIZ
+# QUIZ BAG
 # ============================================================
 
 def refill_quiz_bag():
+
     global quiz_bag
 
-    quiz_bag = list(range(len(QUIZZES)))
-    random.shuffle(quiz_bag)
+    quiz_bag = list(
+        range(len(QUIZZES))
+    )
+
+    random.shuffle(
+        quiz_bag
+    )
 
 
 def get_next_quiz():
+
     global quiz_bag
     global last_quiz_emojis
 
     if not quiz_bag:
         refill_quiz_bag()
 
-    for position, index in enumerate(quiz_bag):
-        emojis = set(QUIZZES[index][0])
+    # Möglichst keine Emojis aus dem letzten Quiz wiederverwenden.
+    for position, index in enumerate(
+        quiz_bag
+    ):
 
-        if not emojis & last_quiz_emojis:
-            quiz_bag.pop(position)
+        emojis = set(
+            QUIZZES[index][0]
+        )
+
+        if not (
+            emojis & last_quiz_emojis
+        ):
+
+            quiz_bag.pop(
+                position
+            )
+
             last_quiz_emojis = emojis
+
             return QUIZZES[index]
 
+    # Falls kein komplett anderes Quiz verfügbar ist:
     index = quiz_bag.pop(0)
-    last_quiz_emojis = set(QUIZZES[index][0])
+
+    last_quiz_emojis = set(
+        QUIZZES[index][0]
+    )
 
     return QUIZZES[index]
 
 
+# ============================================================
+# QUIZ EMBED
+# ============================================================
+
 def create_quiz_embed(emojis):
+
     embed = discord.Embed(
         title="🎯 Emoji-Quiz",
         description=(
@@ -313,228 +431,241 @@ def create_quiz_embed(emojis):
         color=discord.Color.blurple()
     )
 
-    embed.set_footer(text="Viel Glück! 🍀")
+    embed.set_footer(
+        text="Viel Glück! 🍀"
+    )
 
     return embed
 
 
+# ============================================================
+# NEUES QUIZ
+# ============================================================
+
 async def send_new_quiz():
+
     global current_quiz
     global current_quiz_message
 
-    channel = bot.get_channel(QUIZ_CHANNEL_ID)
+    channel = bot.get_channel(
+        QUIZ_CHANNEL_ID
+    )
 
     if channel is None:
-        print("❌ Quiz-Kanal wurde nicht gefunden.")
+
+        print(
+            "❌ Emoji-Quiz-Kanal wurde nicht gefunden."
+        )
+
         return
 
+    # Neues Quiz auswählen
     current_quiz = get_next_quiz()
 
-    embed = create_quiz_embed(current_quiz[0])
+    # Jeder User bekommt beim neuen Quiz
+    # wieder 3 Übersprünge und 3 Hinweise.
+    skip_counts.clear()
+    hint_counts.clear()
 
-    current_quiz_message = await channel.send(embed=embed)
+    embed = create_quiz_embed(
+        current_quiz[0]
+    )
 
-    print(f"✅ Neues Quiz: {current_quiz[1]}")
+    current_quiz_message = await channel.send(
+        embed=embed,
+        view=QuizView()
+    )
+
+    print(
+        f"✅ Neues Quiz: {current_quiz[1]}"
+    )
 
 
-async def cleanup_old_quizzes(channel):
+# ============================================================
+# ALTE QUIZ-NACHRICHTEN LÖSCHEN
+# ============================================================
+
+async def cleanup_old_quizzes(
+    channel
+):
+
     try:
-        async for message in channel.history(limit=100):
+
+        async for message in channel.history(
+            limit=100
+        ):
+
             if message.author != bot.user:
                 continue
 
             if not message.embeds:
                 continue
 
-            if message.embeds[0].title == "🎯 Emoji-Quiz":
-                await safe_delete(message)
+            embed = message.embeds[0]
+
+            if embed.title == "🎯 Emoji-Quiz":
+
+                await safe_delete(
+                    message
+                )
 
     except discord.Forbidden:
-        print("❌ Keine Berechtigung zum Lesen des Verlaufs.")
+
+        print(
+            "❌ Keine Berechtigung, alte Quizze zu löschen."
+        )
 
 
 # ============================================================
-# ABLEHNEN
+# QUIZ BUTTONS
 # ============================================================
 
-class RejectApplicationModal(
-    discord.ui.Modal,
-    title="Bewerbung ablehnen"
+class QuizView(
+    discord.ui.View
 ):
 
-    reason = discord.ui.TextInput(
-        label="Grund für die Ablehnung",
-        placeholder="Bitte schreibe den Grund...",
-        style=discord.TextStyle.paragraph,
-        required=True,
-        min_length=1,
-        max_length=1000
+    def __init__(self):
+
+        super().__init__(
+            timeout=None
+        )
+
+
+    # --------------------------------------------------------
+    # ÜBERSPRINGEN
+    # --------------------------------------------------------
+
+    @discord.ui.button(
+        label="Überspringen",
+        emoji="⏭️",
+        style=discord.ButtonStyle.secondary,
+        custom_id="quiz_skip_button"
     )
+    async def skip(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
 
-    def __init__(self, user):
-        super().__init__()
-        self.user = user
+        global current_quiz
+        global current_quiz_message
 
-    async def on_submit(self, interaction):
-        reason = self.reason.value.strip()
+        user_id = interaction.user.id
 
-        try:
-            await self.user.send(
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "❌ **DEVELOPER-BEWERBUNG**\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                "Leider wurde deine Developer-Bewerbung "
-                "**abgelehnt**.\n\n"
-                "📝 **Grund:**\n"
-                f"{reason}\n\n"
-                "Vielen Dank trotzdem für dein Interesse!\n"
-                "━━━━━━━━━━━━━━━━━━━━"
+        used = skip_counts.get(
+            user_id,
+            0
+        )
+
+        # Schon 3/3
+        if used >= 3:
+
+            await interaction.response.send_message(
+                "Du hast schon **3/3 mal übersprungen**.",
+                ephemeral=True
             )
-        except discord.Forbidden:
-            pass
+
+            return
+
+        # Zähler erhöhen
+        skip_counts[user_id] = used + 1
+
+        # Altes Quiz sichern
+        old_message = current_quiz_message
+
+        # Altes Quiz löschen
+        await safe_delete(
+            old_message
+        )
+
+        # Neues Quiz für alle
+        current_quiz = get_next_quiz()
+
+        embed = create_quiz_embed(
+            current_quiz[0]
+        )
+
+        channel = interaction.channel
+
+        current_quiz_message = await channel.send(
+            embed=embed,
+            view=QuizView()
+        )
 
         await interaction.response.send_message(
-            "🔴 Die Bewerbung wurde abgelehnt.",
+            f"⏭️ Übersprungen!\n\n"
+            f"Du hast noch "
+            f"**{3 - skip_counts[user_id]}/3** "
+            f"Übersprünge.",
             ephemeral=True
         )
 
-        for child in self.view.children:
-            child.disabled = True
 
-        try:
-            await interaction.message.edit(view=self.view)
-        except discord.HTTPException:
-            pass
-
-
-# ============================================================
-# ANNEHMEN / ABLEHNEN
-# ============================================================
-
-class ApplicationDecisionView(discord.ui.View):
-
-    def __init__(self, user):
-        super().__init__(timeout=None)
-        self.user = user
+    # --------------------------------------------------------
+    # ANFANGSBUCHSTABE
+    # --------------------------------------------------------
 
     @discord.ui.button(
-        label="Annehm",
-        emoji="✅",
-        style=discord.ButtonStyle.success,
-        custom_id="application_accept"
+        label="Anfangsbuchstabe",
+        emoji="💡",
+        style=discord.ButtonStyle.primary,
+        custom_id="quiz_hint_button"
     )
-    async def accept(self, interaction, button):
+    async def hint(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
 
-        guild = interaction.guild
+        global current_quiz
 
-        if guild is None:
-            await interaction.response.send_message(
-                "❌ Server konnte nicht gefunden werden.",
-                ephemeral=True
-            )
-            return
+        user_id = interaction.user.id
 
-        role = guild.get_role(DEVELOPER_ROLE_ID)
+        used = hint_counts.get(
+            user_id,
+            0
+        )
 
-        if role is None:
-            await interaction.response.send_message(
-                "❌ Die Developer-Rolle wurde nicht gefunden.",
-                ephemeral=True
-            )
-            return
-
-        member = guild.get_member(self.user.id)
-
-        if member is None:
-            try:
-                member = await guild.fetch_member(self.user.id)
-            except discord.NotFound:
-                await interaction.response.send_message(
-                    "❌ Der Bewerber ist nicht mehr auf dem Server.",
-                    ephemeral=True
-                )
-                return
-            except discord.HTTPException:
-                await interaction.response.send_message(
-                    "❌ Der Bewerber konnte nicht gefunden werden.",
-                    ephemeral=True
-                )
-                return
-
-        try:
-            await member.add_roles(
-                role,
-                reason=f"Developer-Bewerbung angenommen von {interaction.user}"
-            )
-
-        except discord.Forbidden:
-            await interaction.response.send_message(
-                "❌ Ich kann die Developer-Rolle nicht vergeben.\n\n"
-                "Prüfe bitte, ob der Bot **Rollen verwalten** darf "
-                "und ob seine Bot-Rolle über der Developer-Rolle steht.",
-                ephemeral=True
-            )
-            return
-
-        except discord.HTTPException as error:
-            print(f"❌ Rollenfehler: {error}")
+        # Schon 3/3
+        if used >= 3:
 
             await interaction.response.send_message(
-                "❌ Beim Vergeben der Rolle ist ein Fehler aufgetreten.",
+                "Du hast schon **3/3 mal den Anfangsbuchstaben aufgedeckt**.",
                 ephemeral=True
             )
+
             return
 
-        try:
-            await self.user.send(
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "✅ **DEVELOPER-BEWERBUNG**\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                "Herzlichen Glückwunsch! 🎉\n\n"
-                "Deine Developer-Bewerbung wurde "
-                "**angenommen**.\n\n"
-                "Dir wurde die Developer-Rolle zugewiesen.\n\n"
-                "Willkommen im Team! 👨‍💻\n"
-                "━━━━━━━━━━━━━━━━━━━━"
-            )
-        except discord.Forbidden:
-            pass
+        # Zähler erhöhen
+        hint_counts[user_id] = used + 1
 
+        answer = current_quiz[1]
+
+        first_letter = answer[0].upper()
+
+        # Für ALLE sichtbar
         await interaction.response.send_message(
-            f"🟢 Bewerbung angenommen!\n"
-            f"✅ {member.mention} hat {role.mention} erhalten.",
-            ephemeral=True
-        )
-
-        for child in self.children:
-            child.disabled = True
-
-        try:
-            await interaction.message.edit(view=self)
-        except discord.HTTPException:
-            pass
-
-    @discord.ui.button(
-        label="Ablehn",
-        emoji="❌",
-        style=discord.ButtonStyle.danger,
-        custom_id="application_reject"
-    )
-    async def reject(self, interaction, button):
-
-        await interaction.response.send_modal(
-            RejectApplicationModal(self.user)
+            f"💡 **Anfangsbuchstabe:** `{first_letter}`\n\n"
+            f"Verwendet: "
+            f"**{hint_counts[user_id]}/3**",
+            ephemeral=False
         )
 
 
 # ============================================================
-# BEWERBEN BUTTON
+# DEVELOPER-BEWERBUNG BUTTON
 # ============================================================
 
-class DeveloperApplicationView(discord.ui.View):
+class DeveloperApplicationView(
+    discord.ui.View
+):
 
     def __init__(self):
-        super().__init__(timeout=None)
+
+        super().__init__(
+            timeout=None
+        )
+
 
     @discord.ui.button(
         label="Bewerben",
@@ -542,42 +673,54 @@ class DeveloperApplicationView(discord.ui.View):
         style=discord.ButtonStyle.primary,
         custom_id="developer_application_button"
     )
-    async def apply(self, interaction, button):
+    async def apply(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
 
         user = interaction.user
 
         if user.id in active_applications:
+
             await interaction.response.send_message(
-                "⏳ Deine Bewerbung läuft bereits.",
+                "⏳ Deine Developer-Bewerbung läuft bereits.",
                 ephemeral=True
             )
+
             return
 
-        active_applications.add(user.id)
+        active_applications.add(
+            user.id
+        )
 
         try:
+
+            # DM testen
             try:
+
                 await user.send(
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    "👨‍💻 **DEVELOPER-BEWERBUNG**\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n\n"
-                    "Vielen Dank für dein Interesse! ❤️\n\n"
-                    "📋 **Ablauf**\n\n"
-                    "• 9 Fragen\n"
-                    "• Eine Frage nach der anderen\n"
-                    "• Antworte direkt auf jede Frage\n"
-                    "• Schreibe `abbrechen` zum Beenden\n\n"
-                    "🍀 Viel Erfolg!\n"
-                    "━━━━━━━━━━━━━━━━━━━━"
+                    "👨‍💻 **Developer-Bewerbung**\n\n"
+                    "Vielen Dank für dein Interesse an unserem "
+                    "Developer-Team!\n\n"
+                    "Die Bewerbung besteht aus **9 Fragen**.\n"
+                    "Die Fragen kommen **einzeln**.\n\n"
+                    "Du beantwortest Frage 1 → "
+                    "danach kommt Frage 2 → "
+                    "bis Frage 9.\n\n"
+                    "Schreibe **abbrechen**, wenn du die "
+                    "Bewerbung beenden möchtest."
                 )
 
             except discord.Forbidden:
+
                 await interaction.response.send_message(
                     "❌ Ich kann dir keine DM schicken.\n\n"
                     "Bitte aktiviere deine Direktnachrichten "
-                    "für diesen Server.",
+                    "für diesen Server und versuche es erneut.",
                     ephemeral=True
                 )
+
                 return
 
             await interaction.response.send_message(
@@ -585,24 +728,35 @@ class DeveloperApplicationView(discord.ui.View):
                 ephemeral=True
             )
 
-            await start_developer_application(user)
+            await start_developer_application(
+                user
+            )
 
         finally:
-            active_applications.discard(user.id)
+
+            active_applications.discard(
+                user.id
+            )
 
 
 # ============================================================
-# BEWERBUNG
+# DEVELOPER-BEWERBUNG DURCHFÜHREN
 # ============================================================
 
-async def start_developer_application(user):
+async def start_developer_application(
+    user
+):
 
     answers = []
 
     def check(message):
+
         return (
             message.author.id == user.id
-            and isinstance(message.channel, discord.DMChannel)
+            and isinstance(
+                message.channel,
+                discord.DMChannel
+            )
         )
 
     for number, question in enumerate(
@@ -610,30 +764,13 @@ async def start_developer_application(user):
         start=1
     ):
 
-        embed = discord.Embed(
-            title="👨‍💻 Developer-Bewerbung",
-            color=discord.Color.blurple()
+        await user.send(
+            f"**Frage {number}/9**\n\n"
+            f"{question}"
         )
-
-        embed.add_field(
-            name=f"📋 Frage {number}/9",
-            value=question,
-            inline=False
-        )
-
-        embed.add_field(
-            name="✏️ Deine Antwort",
-            value="Schreibe deine Antwort als nächste Nachricht.",
-            inline=False
-        )
-
-        embed.set_footer(
-            text="Schreibe „abbrechen“, wenn du die Bewerbung beenden möchtest."
-        )
-
-        await user.send(embed=embed)
 
         try:
+
             answer_message = await bot.wait_for(
                 "message",
                 timeout=900,
@@ -641,55 +778,60 @@ async def start_developer_application(user):
             )
 
         except asyncio.TimeoutError:
+
             await user.send(
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "⏰ **BEWERBUNG BEENDET**\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                "Du hast zu lange nicht geantwortet."
+                "⏰ Deine Bewerbung wurde beendet, "
+                "weil du zu lange nicht geantwortet hast."
             )
+
             return
 
         answer = answer_message.content.strip()
 
         if normalize(answer) == "abbrechen":
+
             await user.send(
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "❌ **BEWERBUNG ABGEBROCHEN**\n"
-                "━━━━━━━━━━━━━━━━━━━━\n\n"
-                "Deine Bewerbung wurde abgebrochen."
+                "❌ Deine Developer-Bewerbung wurde abgebrochen."
             )
+
             return
 
-        answers.append(answer)
-
-        await user.send(
-            "✅ **Antwort gespeichert!**\n"
-            "➡️ Weiter zur nächsten Frage..."
+        answers.append(
+            answer
         )
 
+    # Bewerbung fertig
     await user.send(
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "✅ **BEWERBUNG ABGESCHLOSSEN**\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "Vielen Dank für deine Bewerbung! ❤️\n\n"
-        "Deine Antworten wurden erfolgreich "
-        "an das Developer-Team übermittelt.\n\n"
-        "⏳ Deine Bewerbung wird nun geprüft."
+        "✅ **Developer-Bewerbung abgeschlossen!**\n\n"
+        "Vielen Dank für deine Bewerbung.\n"
+        "Deine Antworten wurden erfolgreich übermittelt."
     )
 
-    await send_application_to_team(user, answers)
+    await send_application_to_team(
+        user,
+        answers
+    )
 
 
 # ============================================================
-# BEWERBUNG AN TEAM
+# BEWERBUNG AN REVIEW-KANAL
 # ============================================================
 
-async def send_application_to_team(user, answers):
+async def send_application_to_team(
+    user,
+    answers
+):
 
-    channel = bot.get_channel(REVIEW_CHANNEL_ID)
+    channel = bot.get_channel(
+        REVIEW_CHANNEL_ID
+    )
 
     if channel is None:
-        print("❌ Review-Kanal wurde nicht gefunden.")
+
+        print(
+            "❌ Bewerbungs-Review-Kanal wurde nicht gefunden."
+        )
+
         return
 
     embed = discord.Embed(
@@ -702,17 +844,26 @@ async def send_application_to_team(user, answers):
         color=discord.Color.blurple()
     )
 
-    for number, answer in enumerate(answers, start=1):
+    for number, answer in enumerate(
+        answers,
+        start=1
+    ):
 
-        question = DEVELOPER_QUESTIONS[number - 1]
+        question = DEVELOPER_QUESTIONS[
+            number - 1
+        ]
 
         value = (
-            f"**{question}**\n\n"
+            f"**{question}**\n"
             f"{answer}"
         )
 
         if len(value) > 1024:
-            value = value[:1021] + "..."
+
+            value = (
+                value[:1021]
+                + "..."
+            )
 
         embed.add_field(
             name=f"Frage {number}",
@@ -725,17 +876,16 @@ async def send_application_to_team(user, answers):
     )
 
     await channel.send(
-        embed=embed,
-        view=ApplicationDecisionView(user)
+        embed=embed
     )
 
     print(
-        f"✅ Bewerbung von {user} wurde an das Team gesendet."
+        f"✅ Bewerbung von {user} wurde gesendet."
     )
 
 
 # ============================================================
-# BEWERBUNGS-PANEL
+# DEVELOPER PANEL
 # ============================================================
 
 async def send_application_panel():
@@ -745,11 +895,19 @@ async def send_application_panel():
     )
 
     if channel is None:
-        print("❌ Bewerbungskanal wurde nicht gefunden.")
+
+        print(
+            "❌ Developer-Bewerbungskanal wurde nicht gefunden."
+        )
+
         return
 
+    # Prüfen, ob Panel schon existiert
     try:
-        async for message in channel.history(limit=100):
+
+        async for message in channel.history(
+            limit=100
+        ):
 
             if message.author != bot.user:
                 continue
@@ -757,21 +915,33 @@ async def send_application_panel():
             if not message.embeds:
                 continue
 
-            if message.embeds[0].title == "👨‍💻 Developer Bewerbung":
-                print("✅ Developer-Panel existiert bereits.")
+            if (
+                message.embeds[0].title
+                == "👨‍💻 Developer Bewerbung"
+            ):
+
+                print(
+                    "✅ Developer-Panel existiert bereits."
+                )
+
                 return
 
     except discord.Forbidden:
-        print("❌ Keine Berechtigung für den Bewerbungskanal.")
+
+        print(
+            "❌ Keine Berechtigung zum Lesen des Kanals."
+        )
+
         return
 
     embed = discord.Embed(
         title="👨‍💻 Developer Bewerbung",
         description=(
-            "**Du möchtest unser Developer-Team unterstützen?**\n\n"
-            "Klicke unten auf **Bewerben**, um deine Bewerbung "
-            "zu starten.\n\n"
-            "📩 Die Bewerbung läuft anschließend über deine DMs."
+            "**Hier Bewerben Als Developer!**\n\n"
+            "Viel Glück!\n\n"
+            "Du möchtest unser Developer-Team unterstützen?\n"
+            "Klicke unten auf **Bewerben**, "
+            "um deine Bewerbung zu starten."
         ),
         color=discord.Color.blurple()
     )
@@ -785,18 +955,29 @@ async def send_application_panel():
         view=DeveloperApplicationView()
     )
 
-    print("✅ Developer-Panel erstellt.")
+    print(
+        "✅ Developer-Panel erstellt."
+    )
 
 
 # ============================================================
-# BOT
+# BOT KLASSE
 # ============================================================
 
-class QuizBot(discord.Client):
+class QuizBot(
+    discord.Client
+):
 
     async def setup_hook(self):
+
+        # Developer-Button nach Neustart registrieren
         self.add_view(
             DeveloperApplicationView()
+        )
+
+        # Quiz-Buttons nach Neustart registrieren
+        self.add_view(
+            QuizView()
         )
 
 
@@ -806,7 +987,7 @@ bot = QuizBot(
 
 
 # ============================================================
-# BOT ONLINE
+# BOT READY
 # ============================================================
 
 @bot.event
@@ -814,18 +995,25 @@ async def on_ready():
 
     global startup_finished
 
-    print(f"✅ Bot ist online als {bot.user}")
+    print(
+        f"✅ Bot ist online als {bot.user}"
+    )
 
     if startup_finished:
         return
 
     startup_finished = True
 
+    # ========================================================
+    # QUIZ
+    # ========================================================
+
     quiz_channel = bot.get_channel(
         QUIZ_CHANNEL_ID
     )
 
-    if quiz_channel:
+    if quiz_channel is not None:
+
         await cleanup_old_quizzes(
             quiz_channel
         )
@@ -833,7 +1021,14 @@ async def on_ready():
         await send_new_quiz()
 
     else:
-        print("❌ Quiz-Kanal nicht gefunden.")
+
+        print(
+            "❌ Quiz-Kanal wurde nicht gefunden."
+        )
+
+    # ========================================================
+    # DEVELOPER BEWERBUNG
+    # ========================================================
 
     await send_application_panel()
 
@@ -843,17 +1038,22 @@ async def on_ready():
 # ============================================================
 
 @bot.event
-async def on_message(message):
+async def on_message(
+    message
+):
 
     global current_quiz
     global current_quiz_message
 
+    # Eigene Nachrichten ignorieren
     if message.author == bot.user:
         return
 
+    # Nur Quiz-Kanal
     if message.channel.id != QUIZ_CHANNEL_ID:
         return
 
+    # Kein aktives Quiz
     if current_quiz is None:
         return
 
@@ -867,6 +1067,10 @@ async def on_message(message):
 
     user = message.author
 
+    # ========================================================
+    # RICHTIG
+    # ========================================================
+
     if answer == correct_answer:
 
         async with quiz_lock:
@@ -874,11 +1078,13 @@ async def on_message(message):
             if current_quiz is None:
                 return
 
+            # Alte Ergebnis-Nachricht dieses Users löschen
             await delete_previous_result(
                 user,
                 message.channel
             )
 
+            # Neue Richtig-Nachricht
             result_message = await message.channel.send(
                 f"✅ {user.mention} Richtig!"
             )
@@ -887,18 +1093,28 @@ async def on_message(message):
                 user.id
             ] = result_message
 
-            old_quiz_message = current_quiz_message
+            # Altes Quiz sichern
+            old_quiz_message = (
+                current_quiz_message
+            )
 
+            # Quiz deaktivieren
             current_quiz = None
             current_quiz_message = None
 
+            # Altes Quiz löschen
             await safe_delete(
                 old_quiz_message
             )
 
+            # Neues Quiz
             await send_new_quiz()
 
         return
+
+    # ========================================================
+    # FALSCH
+    # ========================================================
 
     await delete_previous_result(
         user,
@@ -907,7 +1123,7 @@ async def on_message(message):
 
     result_message = await message.channel.send(
         f"❌ {user.mention} Leider falsch! "
-        "Nächster Versuch!"
+        "Nächster Versuch, vielleicht wird's dann!"
     )
 
     last_result_messages[
@@ -924,13 +1140,17 @@ TOKEN = os.environ.get(
 )
 
 if not TOKEN:
+
     raise RuntimeError(
-        "❌ DISCORD_TOKEN wurde nicht gefunden."
+        "❌ DISCORD_TOKEN wurde nicht gefunden. "
+        "Prüfe dein GitHub Secret."
     )
 
 
 # ============================================================
-# START
+# BOT STARTEN
 # ============================================================
 
-bot.run(TOKEN)
+bot.run(
+    TOKEN
+)
