@@ -5,14 +5,14 @@ import asyncio
 from datetime import datetime, timezone
 
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 
 
-# ============================================================
+# =========================================================
 # KONFIGURATION
-# ============================================================
+# =========================================================
 
-TOKEN = os.getenv("DISCORD_TOKEN")
+TOKEN = os.environ.get("DISCORD_TOKEN")
 
 GUILD_ID = 1519481018221072454
 
@@ -22,27 +22,23 @@ REVIEW_CHANNEL_ID = 1548404201493762181
 NICKNAME_CHANNEL_ID = 1555684071911202836
 SUPPORT_VOICE_CHANNEL_ID = 1519788919254679602
 SUPPORT_LOG_CHANNEL_ID = 1521439818146648064
-TEAM_REGISTER_CHANNEL_ID = 1527350468832006276
 DEVELOPER_TASK_CHANNEL_ID = 1540442867334385715
 DEVELOPER_SHIFT_CHANNEL_ID = 1540797414863151155
 
 NAMETAG_ROLE_ID = 1520102928398942348
+NAMETAG = "RLP "
 
-# Wer darf Schichten starten/beenden?
 SHIFT_PERMISSION_ROLE_ID = 1523674698574200904
-
-# Rolle, die während einer aktiven Schicht vergeben wird
 DEVELOPER_SHIFT_ROLE_ID = 1527372148979798086
 
-NAMETAG = "RLP "
 DATA_FILE = "bot_data.json"
 
 PANEL_MARKER = "RLP_PANEL:"
 
 
-# ============================================================
-# INTENTS
-# ============================================================
+# =========================================================
+# BOT
+# =========================================================
 
 intents = discord.Intents.default()
 intents.members = True
@@ -56,9 +52,9 @@ bot = commands.Bot(
 )
 
 
-# ============================================================
-# STANDARD-DATEN
-# ============================================================
+# =========================================================
+# DATEN
+# =========================================================
 
 DEFAULT_DATA = {
     "nametag_opt_out": [],
@@ -67,25 +63,21 @@ DEFAULT_DATA = {
     "developer_tasks": {},
     "developer_task_counter": 0,
     "license_plates": {},
-    "team_members": {},
     "support_case_counter": 0
 }
 
 data = {}
-
 startup_finished = False
+quiz_cleanup_task = None
 
 quiz_message_id = None
 current_quiz = None
-quiz_cleanup_task = None
-
 quiz_lock = asyncio.Lock()
-plate_lock = asyncio.Lock()
 
 
-# ============================================================
+# =========================================================
 # DATENBANK
-# ============================================================
+# =========================================================
 
 def load_data():
     global data
@@ -103,28 +95,21 @@ def load_data():
 
         if isinstance(loaded, dict):
             for key, value in loaded.items():
-                data[key] = value
-
-        # Alte/fehlerhafte Daten absichern
-        if not isinstance(data.get("license_plates"), dict):
-            data["license_plates"] = {}
-
-        if not isinstance(data.get("developer_shifts"), dict):
-            data["developer_shifts"] = {}
-
-        if not isinstance(data.get("team_members"), dict):
-            data["team_members"] = {}
+                if key in data:
+                    data[key] = value
 
     except Exception as error:
         print(f"[DATA] Fehler beim Laden: {error}")
         data = json.loads(json.dumps(DEFAULT_DATA))
 
+    save_data()
+
 
 def save_data():
     try:
-        temp_file = DATA_FILE + ".tmp"
+        temporary_file = DATA_FILE + ".tmp"
 
-        with open(temp_file, "w", encoding="utf-8") as file:
+        with open(temporary_file, "w", encoding="utf-8") as file:
             json.dump(
                 data,
                 file,
@@ -132,319 +117,202 @@ def save_data():
                 ensure_ascii=False
             )
 
-        os.replace(temp_file, DATA_FILE)
+        os.replace(temporary_file, DATA_FILE)
 
     except Exception as error:
         print(f"[DATA] Fehler beim Speichern: {error}")
 
 
-# ============================================================
-# ALLGEMEINE HILFSFUNKTIONEN
-# ============================================================
-
-def now():
-    return datetime.now(timezone.utc)
-
-
 def now_text():
-    return now().strftime("%d.%m.%Y %H:%M:%S")
+    return datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M:%S UTC")
 
+
+load_data()
+
+
+# =========================================================
+# HILFSFUNKTIONEN
+# =========================================================
 
 def get_guild():
     return bot.get_guild(GUILD_ID)
 
 
 def get_channel(channel_id):
-    return bot.get_channel(channel_id)
+    guild = get_guild()
+
+    if guild is None:
+        return None
+
+    return guild.get_channel(channel_id)
 
 
-def get_role(guild, role_id):
+def get_role(role_id):
+    guild = get_guild()
+
     if guild is None:
         return None
 
     return guild.get_role(role_id)
 
 
-async def safe_delete(message):
+def has_role(member, role_id):
+    return any(role.id == role_id for role in member.roles)
+
+
+def get_panel_marker(message):
+    if not message.embeds:
+        return None
+
+    embed = message.embeds[0]
+
+    if not embed.footer:
+        return None
+
+    text = embed.footer.text or ""
+
+    if text.startswith(PANEL_MARKER):
+        return text
+
+    return None
+
+
+async def safe_send(channel, *args, **kwargs):
     try:
-        await message.delete()
-    except (
-        discord.NotFound,
-        discord.Forbidden,
-        discord.HTTPException
-    ):
-        pass
+        return await channel.send(*args, **kwargs)
+    except discord.Forbidden:
+        print(f"[DISCORD] Keine Berechtigung für Channel {getattr(channel, 'id', '?')}")
+    except discord.HTTPException as error:
+        print(f"[DISCORD] Fehler beim Senden: {error}")
+
+    return None
 
 
-def member_has_role(member, role_id):
-    return any(
-        role.id == role_id
-        for role in member.roles
-    )
-
-
-# ============================================================
-# PANEL-SYSTEM
-# ============================================================
-
-async def delete_old_panels():
-    """
-    Löscht beim Neustart ausschließlich unsere Panels.
-    Normale Bot-Nachrichten werden NICHT gelöscht.
-    """
-
-    guild = get_guild()
-
-    if guild is None:
-        return
-
-    channels = {
-        NICKNAME_CHANNEL_ID,
-        TEAM_REGISTER_CHANNEL_ID,
-        DEVELOPER_SHIFT_CHANNEL_ID,
-        DEVELOPER_TASK_CHANNEL_ID,
-        APPLICATION_CHANNEL_ID
-    }
-
-    for channel_id in channels:
-
-        channel = guild.get_channel(channel_id)
-
-        if channel is None:
-            continue
-
-        try:
-            async for message in channel.history(limit=None):
-
-                if bot.user is None:
-                    continue
-
-                if message.author.id != bot.user.id:
-                    continue
-
-                is_panel = False
-
-                for embed in message.embeds:
-
-                    footer = embed.footer.text or ""
-
-                    if footer.startswith(PANEL_MARKER):
-                        is_panel = True
-                        break
-
-                if is_panel:
-                    await safe_delete(message)
-
-        except Exception as error:
-            print(
-                f"[PANEL] Fehler in {channel_id}: {error}"
-            )
-
-
-async def upsert_panel(
-    channel,
-    embed,
-    view,
-    panel_name
-):
-    """
-    Erstellt ein Panel oder aktualisiert das bestehende.
-    Dadurch werden Team- und Kennzeichenpanel im selben
-    Kanal nicht mehr gegenseitig gelöscht.
-    """
-
-    if channel is None:
-        return
-
-    embed.set_footer(
-        text=f"{PANEL_MARKER}{panel_name}"
-    )
-
-    existing = None
-
-    try:
-
-        async for message in channel.history(limit=None):
-
-            if message.author.id != bot.user.id:
-                continue
-
-            for old_embed in message.embeds:
-
-                footer = old_embed.footer.text or ""
-
-                if footer == f"{PANEL_MARKER}{panel_name}":
-
-                    if existing is None:
-                        existing = message
-                    else:
-                        await safe_delete(message)
-
-                    break
-
-    except Exception as error:
-        print(f"[PANEL] Suche fehlgeschlagen: {error}")
-
-    try:
-
-        if existing:
-            await existing.edit(
-                embed=embed,
-                view=view
-            )
-        else:
-            await channel.send(
-                embed=embed,
-                view=view
-            )
-
-    except Exception as error:
-        print(f"[PANEL] Fehler: {error}")
-
-
-# ============================================================
+# =========================================================
 # NAMETAG
-# ============================================================
+# =========================================================
+
+def is_nametag_opted_out(member_id):
+    return str(member_id) in data["nametag_opt_out"]
+
+
+def add_nametag_to_name(name):
+    if name.startswith(NAMETAG):
+        return name
+
+    return NAMETAG + name
+
 
 def remove_nametag_from_name(name):
     if name.startswith(NAMETAG):
-        return name[len(NAMETAG):].strip()
+        return name[len(NAMETAG):]
 
     return name
 
 
 async def apply_nametag(member):
-    role = get_role(
-        member.guild,
-        NAMETAG_ROLE_ID
-    )
+    if member.bot:
+        return
 
-    if role is None:
-        return False
+    if is_nametag_opted_out(member.id):
+        return
 
-    try:
+    role = member.guild.get_role(NAMETAG_ROLE_ID)
 
-        if role not in member.roles:
+    if role is not None and role not in member.roles:
+        try:
             await member.add_roles(
                 role,
-                reason="RLP Nametag aktiviert"
+                reason="RLP Nametag-System"
             )
+        except discord.HTTPException as error:
+            print(f"[NAMETAG] Rollenfehler bei {member}: {error}")
 
-        if not member.display_name.startswith(NAMETAG):
+    current_name = member.nick or member.name
 
-            new_name = (
-                NAMETAG +
-                remove_nametag_from_name(
-                    member.display_name
-                )
-            )
+    if not current_name.startswith(NAMETAG):
+        new_name = add_nametag_to_name(current_name)
 
+        if len(new_name) > 32:
+            new_name = new_name[:32]
+
+        try:
             await member.edit(
-                nick=new_name[:32],
-                reason="RLP Nametag aktiviert"
+                nick=new_name,
+                reason="RLP Nametag-System"
             )
-
-        return True
-
-    except (
-        discord.Forbidden,
-        discord.HTTPException
-    ):
-        return False
+        except discord.HTTPException as error:
+            print(f"[NAMETAG] Nickname-Fehler bei {member}: {error}")
 
 
 async def remove_nametag(member):
-    role = get_role(
-        member.guild,
-        NAMETAG_ROLE_ID
-    )
+    role = member.guild.get_role(NAMETAG_ROLE_ID)
 
-    try:
-
-        if role and role in member.roles:
+    if role is not None and role in member.roles:
+        try:
             await member.remove_roles(
                 role,
-                reason="RLP Nametag deaktiviert"
+                reason="RLP Nametag entfernt"
             )
+        except discord.HTTPException as error:
+            print(f"[NAMETAG] Rollen-Entfernungsfehler: {error}")
 
-        new_name = remove_nametag_from_name(
-            member.display_name
-        )
+    current_name = member.nick or member.name
 
-        if not new_name:
-            new_name = member.name
+    if current_name.startswith(NAMETAG):
+        new_name = remove_nametag_from_name(current_name)
 
-        await member.edit(
-            nick=new_name[:32],
-            reason="RLP Nametag deaktiviert"
-        )
+        try:
+            await member.edit(
+                nick=new_name if new_name else None,
+                reason="RLP Nametag entfernt"
+            )
+        except discord.HTTPException as error:
+            print(f"[NAMETAG] Nickname-Fehler beim Entfernen: {error}")
 
-        return True
 
-    except (
-        discord.Forbidden,
-        discord.HTTPException
-    ):
-        return False
-
+# =========================================================
+# NAMETAG PANEL
+# =========================================================
 
 class NametagView(discord.ui.View):
-
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
         label="Nametag aktivieren",
         style=discord.ButtonStyle.success,
-        emoji="✅",
-        custom_id="rlp_nametag_enable"
+        custom_id="rlp_nametag_activate"
     )
-    async def enable(
+    async def activate(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
-
         user_id = str(interaction.user.id)
 
-        data["nametag_opt_out"] = [
-            x for x in data["nametag_opt_out"]
-            if str(x) != user_id
-        ]
+        if user_id in data["nametag_opt_out"]:
+            data["nametag_opt_out"].remove(user_id)
 
         save_data()
 
-        success = await apply_nametag(
-            interaction.user
+        await apply_nametag(interaction.user)
+
+        await interaction.response.send_message(
+            "✅ Dein **RLP Nametag** wurde aktiviert.",
+            ephemeral=True
         )
-
-        if success:
-
-            await interaction.response.send_message(
-                "✅ Dein RLP-Nametag wurde aktiviert.",
-                ephemeral=True
-            )
-
-        else:
-
-            await interaction.response.send_message(
-                "❌ Ich konnte dein Nametag nicht setzen. "
-                "Prüfe die Rollen-Hierarchie und meine Rechte.",
-                ephemeral=True
-            )
 
     @discord.ui.button(
         label="Nametag entfernen",
         style=discord.ButtonStyle.danger,
-        emoji="❌",
-        custom_id="rlp_nametag_disable"
+        custom_id="rlp_nametag_remove"
     )
-    async def disable(
+    async def remove(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
-
         user_id = str(interaction.user.id)
 
         if user_id not in data["nametag_opt_out"]:
@@ -452,160 +320,132 @@ class NametagView(discord.ui.View):
 
         save_data()
 
-        success = await remove_nametag(
-            interaction.user
+        await remove_nametag(interaction.user)
+
+        await interaction.response.send_message(
+            "✅ Dein **RLP Nametag** wurde entfernt und bleibt deaktiviert.",
+            ephemeral=True
         )
 
-        if success:
 
-            await interaction.response.send_message(
-                "✅ Dein RLP-Nametag wurde entfernt.",
-                ephemeral=True
-            )
-
-        else:
-
-            await interaction.response.send_message(
-                "❌ Ich konnte dein Nametag nicht vollständig entfernen.",
-                ephemeral=True
-            )
-
-
-async def send_nametag_panel():
-
-    channel = get_channel(
-        NICKNAME_CHANNEL_ID
-    )
-
-    if channel is None:
-        return
-
+def create_nametag_embed():
     embed = discord.Embed(
         title="🏷️ RLP Nametag",
         description=(
-            "**Nametag-Verwaltung**\n\n"
-            "Mit den Buttons kannst du dein RLP-Nametag "
-            "jederzeit aktivieren oder entfernen.\n\n"
-            f"**Aktives Nametag:** `{NAMETAG}`\n\n"
-            "Die Einstellung wird gespeichert und bleibt "
-            "auch nach einem Bot-Neustart erhalten."
+            "Verwalte hier dein persönliches **RLP Nametag**.\n\n"
+            "Mit **Nametag aktivieren** wird dein RLP Nametag gesetzt.\n"
+            "Mit **Nametag entfernen** wird es entfernt und bleibt deaktiviert."
         ),
         color=discord.Color.blurple()
     )
 
-    await upsert_panel(
-        channel,
-        embed,
-        NametagView(),
-        "nametag"
+    embed.set_footer(
+        text=PANEL_MARKER + "nametag"
     )
 
+    return embed
 
-# ============================================================
-# KENNZEICHEN-SYSTEM
-# ============================================================
 
-def normalize_plate(value):
-    return " ".join(
-        value.upper().strip().split()
+# =========================================================
+# KENNZEICHEN
+# =========================================================
+
+def normalize_plate(plate):
+    plate = plate.upper().strip()
+
+    plate = " ".join(
+        part for part in plate.split()
+        if part
     )
 
+    return plate
 
-def split_plate(value):
-    """
-    RLP 01
-    RY ZE 01
-    NRW 123
 
-    Alles vor der letzten Gruppe = Name/Kürzel.
-    Letzte Gruppe = Nummer.
-
-    Wichtig:
-    Nur die Nummer wird global geprüft.
-    """
-
-    value = normalize_plate(value)
-
-    parts = value.split()
+def split_plate(plate):
+    parts = normalize_plate(plate).split()
 
     if len(parts) < 2:
         return None, None
 
-    name = " ".join(parts[:-1])
     number = parts[-1]
+    prefix = " ".join(parts[:-1])
 
-    if not name or not number:
+    if not prefix:
         return None, None
 
-    return name, number
+    if not number.isdigit():
+        return None, None
+
+    return prefix, number
 
 
-def get_saved_plate(user_id):
-    value = data["license_plates"].get(
-        str(user_id)
-    )
+def get_user_plate(user_id):
+    entry = data["license_plates"].get(str(user_id))
 
-    if value is None:
+    if not isinstance(entry, dict):
         return None
 
-    if isinstance(value, str):
-        return value
+    plate = entry.get("plate")
 
-    if isinstance(value, dict):
-        return value.get("plate")
+    if not plate:
+        return None
 
-    return None
-
-
-def plate_number(plate):
-    parts = normalize_plate(plate).split()
-
-    if not parts:
-        return ""
-
-    return parts[-1]
+    return plate
 
 
-def find_plate_number(number):
-    """
-    Sucht ausschließlich nach der Nummer.
+def find_plate_number(number, ignore_user_id=None):
+    for user_id, entry in data["license_plates"].items():
+        if ignore_user_id is not None and str(user_id) == str(ignore_user_id):
+            continue
 
-    RLP 01
-    RY 01
+        if not isinstance(entry, dict):
+            continue
 
-    sind deshalb beide nicht gleichzeitig erlaubt.
-    """
+        plate = entry.get("plate")
 
-    number = str(number).upper().strip()
+        if not plate:
+            continue
 
-    for user_id, value in data[
-        "license_plates"
-    ].items():
+        _, saved_number = split_plate(plate)
 
-        if isinstance(value, str):
-            plate = value
-        else:
-            plate = value.get(
-                "plate",
-                ""
-            )
-
-        if plate_number(plate) == number:
+        if saved_number == number:
             return user_id, plate
 
     return None, None
 
 
-class PlateModal(
-    discord.ui.Modal,
-    title="Kennzeichen registrieren"
-):
+def get_all_plates():
+    plates = []
 
-    plate = discord.ui.TextInput(
+    for user_id, entry in data["license_plates"].items():
+        if not isinstance(entry, dict):
+            continue
+
+        plate = entry.get("plate")
+
+        if not plate:
+            continue
+
+        plates.append(
+            (
+                int(user_id),
+                plate
+            )
+        )
+
+    plates.sort(
+        key=lambda item: item[1]
+    )
+
+    return plates
+
+
+class PlateModal(discord.ui.Modal, title="Kennzeichen registrieren"):
+    plate_input = discord.ui.TextInput(
         label="Kennzeichen",
-        placeholder="z. B. RLP 01",
+        placeholder="z. B. RLP 01 oder RY ZE 02",
         min_length=2,
-        max_length=25,
+        max_length=20,
         required=True
     )
 
@@ -613,155 +453,122 @@ class PlateModal(
         self,
         interaction: discord.Interaction
     ):
+        user_id = str(interaction.user.id)
 
-        async with plate_lock:
+        existing_plate = get_user_plate(user_id)
 
-            user_id = str(
-                interaction.user.id
+        if existing_plate:
+            await interaction.response.send_message(
+                f"❌ Du hast bereits das Kennzeichen **{existing_plate}** registriert.\n"
+                "Entferne es zuerst, wenn du ein anderes registrieren möchtest.",
+                ephemeral=True
             )
+            return
 
-            existing = get_saved_plate(
-                user_id
+        plate = normalize_plate(self.plate_input.value)
+
+        prefix, number = split_plate(plate)
+
+        if prefix is None or number is None:
+            await interaction.response.send_message(
+                "❌ Ungültiges Kennzeichen.\n\n"
+                "Das Kennzeichen muss aus einem Präfix und einer **Zahl** bestehen, "
+                "z. B. `RLP 01`, `RY 02` oder `RY ZE 03`.",
+                ephemeral=True
             )
+            return
 
-            if existing:
+        existing_user, existing_plate = find_plate_number(
+            number
+        )
 
-                await interaction.response.send_message(
-                    f"❌ Du hast bereits `{existing}` registriert.\n"
-                    "Lösche dein aktuelles Kennzeichen zuerst.",
-                    ephemeral=True
-                )
-                return
-
-            plate = normalize_plate(
-                str(self.plate.value)
+        if existing_user is not None:
+            await interaction.response.send_message(
+                f"❌ Die Nummer **{number}** ist bereits vergeben.\n"
+                "Die Nummer muss serverweit eindeutig sein.",
+                ephemeral=True
             )
+            return
 
-            name, number = split_plate(
-                plate
-            )
+        data["license_plates"][user_id] = {
+            "plate": plate,
+            "registered_at": now_text()
+        }
 
-            if name is None or number is None:
-
-                await interaction.response.send_message(
-                    "❌ Ungültiges Format.\n\n"
-                    "Beispiele:\n"
-                    "`RLP 01`\n"
-                    "`RY ZE 01`",
-                    ephemeral=True
-                )
-                return
-
-            # ==================================================
-            # ENTSCHEIDEND:
-            # NUR DIE NUMMER DARF NICHT DOPPELT VORKOMMEN.
-            # ==================================================
-
-            existing_user, existing_plate = (
-                find_plate_number(number)
-            )
-
-            if existing_user is not None:
-
-                await interaction.response.send_message(
-                    f"❌ Die Nummer **{number}** ist bereits vergeben.\n\n"
-                    f"Ein anderes Mitglied besitzt bereits "
-                    f"`{existing_plate}`.\n\n"
-                    "Der Buchstaben-/Namensbereich darf doppelt "
-                    "vorkommen, die Nummer jedoch nicht.",
-                    ephemeral=True
-                )
-                return
-
-            data["license_plates"][user_id] = {
-                "plate": plate,
-                "registered_at": now_text()
-            }
-
-            save_data()
+        save_data()
 
         await interaction.response.send_message(
-            f"✅ Dein Kennzeichen **`{plate}`** wurde registriert.",
+            f"✅ Dein Kennzeichen **{plate}** wurde erfolgreich registriert.",
             ephemeral=True
         )
 
-        await send_license_plate_panel()
+        await update_license_plate_panel()
 
 
-class PlateDeleteConfirm(
-    discord.ui.View
-):
-
-    def __init__(self, user_id):
+class PlateDeleteConfirm(discord.ui.View):
+    def __init__(self):
         super().__init__(timeout=60)
-        self.user_id = user_id
 
     @discord.ui.button(
-        label="Endgültig löschen",
-        style=discord.ButtonStyle.danger,
-        emoji="🗑️"
+        label="Kennzeichen entfernen",
+        style=discord.ButtonStyle.danger
     )
     async def confirm(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+        user_id = str(interaction.user.id)
 
-        if interaction.user.id != self.user_id:
+        plate = get_user_plate(user_id)
 
-            await interaction.response.send_message(
-                "❌ Diese Bestätigung gehört nicht dir.",
-                ephemeral=True
+        if not plate:
+            await interaction.response.edit_message(
+                content="❌ Du hast kein Kennzeichen registriert.",
+                embed=None,
+                view=None
             )
             return
 
-        async with plate_lock:
+        del data["license_plates"][user_id]
 
-            user_id = str(
-                interaction.user.id
-            )
-
-            old = get_saved_plate(
-                user_id
-            )
-
-            if not old:
-
-                await interaction.response.edit_message(
-                    content="❌ Du hast kein Kennzeichen mehr.",
-                    embed=None,
-                    view=None
-                )
-                return
-
-            del data["license_plates"][
-                user_id
-            ]
-
-            save_data()
+        save_data()
 
         await interaction.response.edit_message(
             content=(
-                f"✅ `{old}` wurde gelöscht.\n"
-                f"Die Nummer **{plate_number(old)}** ist "
-                "jetzt wieder frei."
+                f"✅ Das Kennzeichen **{plate}** wurde entfernt.\n"
+                "Die Nummer ist jetzt wieder frei."
             ),
             embed=None,
             view=None
         )
 
-        await send_license_plate_panel()
+        await update_license_plate_panel()
+
+    @discord.ui.button(
+        label="Abbrechen",
+        style=discord.ButtonStyle.secondary
+    )
+    async def cancel(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await interaction.response.edit_message(
+            content="Abgebrochen.",
+            embed=None,
+            view=None
+        )
 
 
 class PlateView(discord.ui.View):
-
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
         label="Kennzeichen registrieren",
-        style=discord.ButtonStyle.success,
         emoji="🚘",
+        style=discord.ButtonStyle.success,
         custom_id="rlp_plate_register"
     )
     async def register(
@@ -769,558 +576,286 @@ class PlateView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
-
-        if get_saved_plate(
-            interaction.user.id
-        ):
-
-            await interaction.response.send_message(
-                "❌ Du hast bereits ein Kennzeichen.",
-                ephemeral=True
-            )
-            return
-
         await interaction.response.send_modal(
             PlateModal()
         )
 
     @discord.ui.button(
-        label="Mein Kennzeichen löschen",
-        style=discord.ButtonStyle.danger,
+        label="Mein Kennzeichen entfernen",
         emoji="🗑️",
-        custom_id="rlp_plate_delete"
+        style=discord.ButtonStyle.danger,
+        custom_id="rlp_plate_remove"
     )
-    async def delete(
+    async def remove(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
-
-        plate = get_saved_plate(
-            interaction.user.id
-        )
+        plate = get_user_plate(interaction.user.id)
 
         if not plate:
-
             await interaction.response.send_message(
-                "ℹ️ Du hast aktuell kein Kennzeichen.",
+                "❌ Du hast kein Kennzeichen registriert.",
                 ephemeral=True
             )
             return
 
-        embed = discord.Embed(
-            title="🗑️ Kennzeichen löschen",
-            description=(
-                f"Dein Kennzeichen:\n\n"
-                f"### `{plate}`\n\n"
-                f"Die Nummer **{plate_number(plate)}** "
-                "wird danach wieder freigegeben."
-            ),
-            color=discord.Color.orange()
-        )
-
         await interaction.response.send_message(
-            embed=embed,
-            view=PlateDeleteConfirm(
-                interaction.user.id
-            ),
+            f"Soll **{plate}** wirklich entfernt werden?",
+            view=PlateDeleteConfirm(),
             ephemeral=True
         )
 
 
-async def send_license_plate_panel():
-
-    channel = get_channel(
-        TEAM_REGISTER_CHANNEL_ID
-    )
-
-    if channel is None:
-        return
-
-    entries = []
-
-    for user_id, value in data[
-        "license_plates"
-    ].items():
-
-        if isinstance(value, str):
-            plate = value
-        else:
-            plate = value.get(
-                "plate",
-                ""
-            )
-
-        if not plate:
-            continue
-
-        member = channel.guild.get_member(
-            int(user_id)
-        )
-
-        mention = (
-            member.mention
-            if member
-            else f"<@{user_id}>"
-        )
-
-        entries.append(
-            (
-                plate_number(plate),
-                f"🚘 `{plate}` — {mention}"
-            )
-        )
-
-    entries.sort(
-        key=lambda item: (
-            int(item[0])
-            if item[0].isdigit()
-            else item[0]
-        )
-    )
-
-    if entries:
-
-        lines = [
-            item[1]
-            for item in entries
-        ]
-
-        content = "\n".join(lines)
-
-    else:
-
-        content = (
-            "Noch keine Kennzeichen registriert."
-        )
-
-    if len(content) > 3900:
-        content = content[:3900] + "\n…"
+def create_license_plate_embed():
+    plates = get_all_plates()
 
     embed = discord.Embed(
         title="🚘 Kennzeichen-System",
         description=(
-            "**Registriere dein persönliches Kennzeichen.**\n\n"
-            "• Jeder User darf **ein** Kennzeichen besitzen.\n"
-            "• Der Buchstaben-/Namensbereich darf mehrfach vorkommen.\n"
-            "• **Die Nummer darf serverweit nur einmal vorkommen.**\n"
-            "• Nach dem Löschen wird die Nummer sofort wieder frei.\n\n"
-            "**Beispiele**\n"
-            "✅ `RLP 01`\n"
-            "❌ `RY 01` wenn `01` bereits vergeben ist\n"
-            "✅ `RY 02`"
+            "Hier kannst du dein Kennzeichen registrieren oder entfernen.\n\n"
+            "**Wichtig:**\n"
+            "• Jeder Benutzer kann nur **ein** Kennzeichen besitzen.\n"
+            "• Die **Nummer** ist serverweit einmalig.\n"
+            "• Der Präfix darf sich wiederholen.\n"
+            "• Nach dem Entfernen wird die Nummer wieder frei."
         ),
-        color=discord.Color.blurple()
+        color=discord.Color.dark_blue()
     )
 
-    embed.add_field(
-        name="📋 Aktuelle Kennzeichen",
-        value=content,
-        inline=False
-    )
-
-    await upsert_panel(
-        channel,
-        embed,
-        PlateView(),
-        "license_plates"
-    )
-
-
-# ============================================================
-# TEAM-REGISTRIERUNG
-# ============================================================
-
-class TeamModal(
-    discord.ui.Modal,
-    title="Team-Registrierung"
-):
-
-    name = discord.ui.TextInput(
-        label="Name",
-        placeholder="Dein Name",
-        max_length=50,
-        required=True
-    )
-
-    async def on_submit(
-        self,
-        interaction: discord.Interaction
-    ):
-
-        user_id = str(
-            interaction.user.id
-        )
-
-        data["team_members"][user_id] = {
-            "name": str(
-                self.name.value
-            ).strip(),
-            "registered_at": now_text()
-        }
-
-        # WICHTIG:
-        # HIER WIRD KEINE ROLLE VERGEBEN.
-        save_data()
-
-        await interaction.response.send_message(
-            "✅ Du wurdest erfolgreich registriert.",
-            ephemeral=True
-        )
-
-        await send_team_panel()
-
-
-class TeamView(discord.ui.View):
-
-    def __init__(self):
-        super().__init__(timeout=None)
-
-    @discord.ui.button(
-        label="Registrieren",
-        style=discord.ButtonStyle.success,
-        emoji="👥",
-        custom_id="rlp_team_register"
-    )
-    async def register(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-
-        await interaction.response.send_modal(
-            TeamModal()
-        )
-
-
-async def send_team_panel():
-
-    channel = get_channel(
-        TEAM_REGISTER_CHANNEL_ID
-    )
-
-    if channel is None:
-        return
-
-    members = data.get(
-        "team_members",
-        {}
-    )
-
-    if members:
-
+    if plates:
         lines = []
 
-        for user_id, info in members.items():
+        for user_id, plate in plates:
+            member = get_guild().get_member(user_id)
 
-            name = info.get(
-                "name",
-                "Unbekannt"
-            )
+            if member:
+                name = member.display_name
+            else:
+                name = f"User {user_id}"
 
             lines.append(
-                f"• <@{user_id}> — **{name}**"
+                f"🚘 **{plate}** — {name}"
             )
 
-        content = "\n".join(lines)
+        description = "\n".join(lines)
 
-        if len(content) > 3900:
-            content = content[:3900] + "\n…"
+        if len(description) > 3900:
+            description = description[:3890] + "\n..."
 
-    else:
-
-        content = (
-            "Noch keine Team-Registrierungen."
+        embed.add_field(
+            name="Registrierte Kennzeichen",
+            value=description,
+            inline=False
         )
 
-    embed = discord.Embed(
-        title="👥 Team-Registrierung",
-        description=(
-            "Hier kannst du dich für das Team registrieren.\n\n"
-            "Die Registrierung speichert deine Angaben, "
-            "vergibt aber **keine Rolle automatisch**."
-        ),
-        color=discord.Color.blurple()
+    else:
+        embed.add_field(
+            name="Registrierte Kennzeichen",
+            value="Noch keine Kennzeichen registriert.",
+            inline=False
+        )
+
+    embed.set_footer(
+        text=PANEL_MARKER + "license_plates"
     )
 
-    embed.add_field(
-        name="Registrierte Mitglieder",
-        value=content,
-        inline=False
-    )
-
-    await upsert_panel(
-        channel,
-        embed,
-        TeamView(),
-        "team"
-    )
+    return embed
 
 
-# ============================================================
-# SCHICHT-SYSTEM
-# ============================================================
+# =========================================================
+# TEAM-SYSTEM
+# =========================================================
 
-def can_manage_shift(member):
-    return member_has_role(
-        member,
-        SHIFT_PERMISSION_ROLE_ID
-    )
+# ABSICHTLICH KEIN TEAM-SYSTEM.
+#
+# Es gibt hier:
+# - keine Team-Rolle
+# - kein Team-Panel
+# - keine Team-Registrierung
+# - keine Team-Daten
+# - keine automatische Team-Rollenvergabe
+#
+# Dadurch kann dieses Script niemandem aufgrund einer
+# Team-Registrierung eine Rolle geben.
 
+
+# =========================================================
+# SCHICHTSYSTEM
+# =========================================================
 
 class ShiftView(discord.ui.View):
-
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
         label="Schicht starten",
+        emoji="🟢",
         style=discord.ButtonStyle.success,
-        emoji="▶️",
         custom_id="rlp_shift_start"
     )
-    async def start(
+    async def start_shift(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+        member = interaction.user
 
-        member = interaction.guild.get_member(
-            interaction.user.id
-        )
-
-        if member is None:
+        if not isinstance(member, discord.Member):
+            await interaction.response.send_message(
+                "❌ Dieser Vorgang funktioniert nur auf dem Server.",
+                ephemeral=True
+            )
             return
 
-        if not can_manage_shift(member):
-
+        if not has_role(
+            member,
+            SHIFT_PERMISSION_ROLE_ID
+        ):
             await interaction.response.send_message(
-                "❌ Du besitzt nicht die erforderliche Rolle.",
+                "❌ Du hast keine Berechtigung, eine Schicht zu starten.",
                 ephemeral=True
             )
             return
 
         user_id = str(member.id)
 
-        if user_id in data[
-            "developer_shifts"
-        ]:
-
+        if user_id in data["developer_shifts"]:
             await interaction.response.send_message(
-                "ℹ️ Du hast bereits eine aktive Schicht.",
+                "⚠️ Du bist bereits im Dienst.",
                 ephemeral=True
             )
             return
-
-        role = get_role(
-            interaction.guild,
-            DEVELOPER_SHIFT_ROLE_ID
-        )
-
-        if role is None:
-
-            await interaction.response.send_message(
-                "❌ Die Schicht-Rolle wurde nicht gefunden.",
-                ephemeral=True
-            )
-            return
-
-        try:
-
-            await member.add_roles(
-                role,
-                reason="Developer-Schicht gestartet"
-            )
-
-        except discord.Forbidden:
-
-            await interaction.response.send_message(
-                "❌ Ich kann die Schicht-Rolle nicht vergeben. "
-                "Prüfe die Rollen-Hierarchie.",
-                ephemeral=True
-            )
-            return
-
-        started = now_text()
 
         data["developer_shifts"][user_id] = {
-            "started_at": started
+            "started_at": now_text()
         }
 
         save_data()
+
+        active_role = member.guild.get_role(
+            DEVELOPER_SHIFT_ROLE_ID
+        )
+
+        if active_role is not None and active_role not in member.roles:
+            try:
+                await member.add_roles(
+                    active_role,
+                    reason="RLP Schicht gestartet"
+                )
+            except discord.HTTPException as error:
+                print(f"[SHIFT] Fehler beim Rollen-Geben: {error}")
+
+        await send_shift_log(
+            member,
+            "Schicht gestartet",
+            "🟢"
+        )
 
         await interaction.response.send_message(
             "🟢 Deine Schicht wurde gestartet.",
             ephemeral=True
         )
 
-        await send_shift_panel()
-
-        await send_shift_log(
-            member,
-            "start",
-            started
-        )
-
     @discord.ui.button(
         label="Schicht beenden",
+        emoji="🔴",
         style=discord.ButtonStyle.danger,
-        emoji="⏹️",
         custom_id="rlp_shift_end"
     )
-    async def stop(
+    async def end_shift(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+        member = interaction.user
 
-        member = interaction.guild.get_member(
-            interaction.user.id
-        )
-
-        if member is None:
+        if not isinstance(member, discord.Member):
+            await interaction.response.send_message(
+                "❌ Dieser Vorgang funktioniert nur auf dem Server.",
+                ephemeral=True
+            )
             return
 
-        if not can_manage_shift(member):
-
+        if not has_role(
+            member,
+            SHIFT_PERMISSION_ROLE_ID
+        ):
             await interaction.response.send_message(
-                "❌ Du besitzt nicht die erforderliche Rolle.",
+                "❌ Du hast keine Berechtigung, eine Schicht zu beenden.",
                 ephemeral=True
             )
             return
 
         user_id = str(member.id)
 
-        shift = data[
-            "developer_shifts"
-        ].get(user_id)
+        shift = data["developer_shifts"].get(user_id)
 
         if not shift:
-
             await interaction.response.send_message(
-                "ℹ️ Du hast keine aktive Schicht.",
+                "⚠️ Du bist aktuell nicht im Dienst.",
                 ephemeral=True
             )
             return
 
-        role = get_role(
-            interaction.guild,
+        started_at = shift.get("started_at")
+
+        del data["developer_shifts"][user_id]
+
+        save_data()
+
+        active_role = member.guild.get_role(
             DEVELOPER_SHIFT_ROLE_ID
         )
 
-        try:
-
-            if role and role in member.roles:
-
+        if active_role is not None and active_role in member.roles:
+            try:
                 await member.remove_roles(
-                    role,
-                    reason="Developer-Schicht beendet"
+                    active_role,
+                    reason="RLP Schicht beendet"
                 )
+            except discord.HTTPException as error:
+                print(f"[SHIFT] Fehler beim Rollen-Entfernen: {error}")
 
-        except discord.Forbidden:
-
-            await interaction.response.send_message(
-                "❌ Ich kann die Schicht-Rolle nicht entfernen.",
-                ephemeral=True
-            )
-            return
-
-        ended = now_text()
-        started = shift.get(
-            "started_at",
-            "Unbekannt"
+        await send_shift_log(
+            member,
+            "Schicht beendet",
+            "🔴",
+            started_at
         )
-
-        del data[
-            "developer_shifts"
-        ][user_id]
-
-        save_data()
 
         await interaction.response.send_message(
             "🔴 Deine Schicht wurde beendet.",
             ephemeral=True
         )
 
-        await send_shift_panel()
 
-        await send_shift_log(
-            member,
-            "end",
-            ended,
-            started
-        )
+def create_shift_embed():
+    embed = discord.Embed(
+        title="🛠️ Entwickler-Schicht",
+        description=(
+            "Verwalte hier deine aktuelle Entwickler-Schicht.\n\n"
+            "🟢 **Schicht starten**\n"
+            "Startet deine Schicht und gibt dir die aktive Schicht-Rolle.\n\n"
+            "🔴 **Schicht beenden**\n"
+            "Beendet deine Schicht und entfernt die aktive Schicht-Rolle."
+        ),
+        color=discord.Color.green()
+    )
+
+    embed.set_footer(
+        text=PANEL_MARKER + "shift"
+    )
+
+    return embed
 
 
 async def send_shift_log(
     member,
     action,
-    timestamp,
-    started=None
+    emoji,
+    started_at=None
 ):
-
-    channel = get_channel(
-        DEVELOPER_SHIFT_CHANNEL_ID
-    )
-
-    # Falls du einen separaten Log-Kanal möchtest,
-    # kann hier später einfach die Channel-ID geändert werden.
-    log_channel = channel
-
-    if log_channel is None:
-        return
-
-    if action == "start":
-
-        embed = discord.Embed(
-            title="🟢 Schicht gestartet",
-            description=(
-                f"{member.mention} hat eine "
-                "**Developer-Schicht gestartet.**"
-            ),
-            color=discord.Color.green(),
-            timestamp=now()
-        )
-
-        embed.add_field(
-            name="Start",
-            value=timestamp,
-            inline=False
-        )
-
-    else:
-
-        embed = discord.Embed(
-            title="🔴 Schicht beendet",
-            description=(
-                f"{member.mention} hat die "
-                "**Developer-Schicht beendet.**"
-            ),
-            color=discord.Color.red(),
-            timestamp=now()
-        )
-
-        embed.add_field(
-            name="Start",
-            value=started or "Unbekannt",
-            inline=True
-        )
-
-        embed.add_field(
-            name="Ende",
-            value=timestamp,
-            inline=True
-        )
-
-    # Log als normale Nachricht.
-    # Das Panel-System erkennt es NICHT als Panel.
-    await log_channel.send(
-        embed=embed
-    )
-
-
-async def send_shift_panel():
-
     channel = get_channel(
         DEVELOPER_SHIFT_CHANNEL_ID
     )
@@ -1328,73 +863,49 @@ async def send_shift_panel():
     if channel is None:
         return
 
-    active = data.get(
-        "developer_shifts",
-        {}
-    )
-
-    if active:
-
-        lines = []
-
-        for user_id, info in active.items():
-
-            started = info.get(
-                "started_at",
-                "Unbekannt"
-            )
-
-            lines.append(
-                f"🟢 <@{user_id}> — seit `{started}`"
-            )
-
-        content = "\n".join(lines)
-
-    else:
-
-        content = (
-            "🟢 Aktuell ist niemand auf Schicht."
-        )
-
     embed = discord.Embed(
-        title="⏱️ Developer-Schichten",
-        description=(
-            "Über dieses Panel können berechtigte "
-            "Developer ihre Schicht starten und beenden.\n\n"
-            f"**Berechtigungsrolle:** <@&{SHIFT_PERMISSION_ROLE_ID}>\n"
-            f"**Aktive Schichtrolle:** <@&{DEVELOPER_SHIFT_ROLE_ID}>"
+        title=f"{emoji} {action}",
+        color=(
+            discord.Color.green()
+            if "gestartet" in action
+            else discord.Color.red()
         ),
-        color=discord.Color.blurple()
+        timestamp=datetime.now(timezone.utc)
     )
 
     embed.add_field(
-        name="Aktive Schichten",
-        value=content,
+        name="Benutzer",
+        value=f"{member.mention}\n`{member.id}`",
         inline=False
     )
 
-    await upsert_panel(
+    if started_at:
+        embed.add_field(
+            name="Schicht gestartet",
+            value=started_at,
+            inline=False
+        )
+
+    embed.set_footer(
+        text="RLP Schicht-Log"
+    )
+
+    await safe_send(
         channel,
-        embed,
-        ShiftView(),
-        "shifts"
+        embed=embed
     )
 
 
-# ============================================================
-# DEVELOPER TASKS
-# ============================================================
+# =========================================================
+# TASK SYSTEM
+# =========================================================
 
-class TaskModal(
-    discord.ui.Modal,
-    title="Developer Task"
-):
-
-    task = discord.ui.TextInput(
+class TaskModal(discord.ui.Modal, title="Neue Entwickler-Aufgabe"):
+    task_input = discord.ui.TextInput(
         label="Aufgabe",
-        placeholder="Beschreibe die Aufgabe...",
+        placeholder="Beschreibung der Aufgabe...",
         style=discord.TextStyle.paragraph,
-        max_length=1500,
+        max_length=1000,
         required=True
     )
 
@@ -1402,146 +913,134 @@ class TaskModal(
         self,
         interaction: discord.Interaction
     ):
+        global data
 
-        data[
-            "developer_task_counter"
-        ] += 1
+        if not has_role(
+            interaction.user,
+            SHIFT_PERMISSION_ROLE_ID
+        ):
+            await interaction.response.send_message(
+                "❌ Du hast keine Berechtigung.",
+                ephemeral=True
+            )
+            return
 
-        task_id = data[
-            "developer_task_counter"
-        ]
+        data["developer_task_counter"] += 1
 
-        data[
-            "developer_tasks"
-        ][str(task_id)] = {
-            "task": str(
-                self.task.value
-            ),
-            "creator": interaction.user.id,
+        task_id = data["developer_task_counter"]
+
+        data["developer_tasks"][str(task_id)] = {
+            "task": self.task_input.value,
+            "created_by": interaction.user.id,
             "created_at": now_text(),
-            "status": "offen"
+            "completed": False
         }
 
         save_data()
 
         await interaction.response.send_message(
-            f"✅ Task **#{task_id}** erstellt.",
+            f"✅ Aufgabe **#{task_id}** wurde erstellt.",
             ephemeral=True
         )
 
-        await send_task_panel()
+        await update_task_panel()
 
 
 class TaskView(discord.ui.View):
-
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Task erstellen",
-        style=discord.ButtonStyle.primary,
+        label="Aufgabe erstellen",
         emoji="➕",
+        style=discord.ButtonStyle.primary,
         custom_id="rlp_task_create"
     )
-    async def create(
+    async def create_task(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
+        if not has_role(
+            interaction.user,
+            SHIFT_PERMISSION_ROLE_ID
+        ):
+            await interaction.response.send_message(
+                "❌ Du hast keine Berechtigung.",
+                ephemeral=True
+            )
+            return
 
         await interaction.response.send_modal(
             TaskModal()
         )
 
 
-async def send_task_panel():
-
-    channel = get_channel(
-        DEVELOPER_TASK_CHANNEL_ID
-    )
-
-    if channel is None:
-        return
-
-    tasks_data = data.get(
-        "developer_tasks",
-        {}
-    )
-
-    if not tasks_data:
-
-        content = (
-            "Noch keine Aufgaben vorhanden."
-        )
-
-    else:
-
-        lines = []
-
-        for task_id, info in tasks_data.items():
-
-            status = info.get(
-                "status",
-                "offen"
-            )
-
-            emoji = (
-                "🟢"
-                if status == "erledigt"
-                else "🟡"
-            )
-
-            lines.append(
-                f"{emoji} **#{task_id}** — "
-                f"{info.get('task', 'Keine Beschreibung')}"
-            )
-
-        content = "\n".join(lines)
-
-        if len(content) > 3900:
-            content = content[:3900] + "\n…"
-
+def create_task_embed():
     embed = discord.Embed(
-        title="🛠️ Developer Task Center",
-        description=(
-            "Hier können neue Developer-Aufgaben "
-            "erstellt und angezeigt werden."
-        ),
+        title="📝 Entwickler-Aufgaben",
+        description="Hier werden aktuelle Entwickler-Aufgaben verwaltet.",
         color=discord.Color.blurple()
     )
 
-    embed.add_field(
-        name="Aufgaben",
-        value=content,
-        inline=False
+    tasks = data.get("developer_tasks", {})
+
+    active_tasks = [
+        (task_id, task)
+        for task_id, task in tasks.items()
+        if not task.get("completed", False)
+    ]
+
+    if not active_tasks:
+        embed.add_field(
+            name="Aktuelle Aufgaben",
+            value="Keine offenen Aufgaben.",
+            inline=False
+        )
+
+    else:
+        lines = []
+
+        for task_id, task in active_tasks[:20]:
+            lines.append(
+                f"**#{task_id}** — {task.get('task', 'Keine Beschreibung')}"
+            )
+
+        embed.add_field(
+            name="Aktuelle Aufgaben",
+            value="\n".join(lines),
+            inline=False
+        )
+
+    embed.set_footer(
+        text=PANEL_MARKER + "tasks"
     )
 
-    await upsert_panel(
-        channel,
-        embed,
-        TaskView(),
-        "tasks"
-    )
+    return embed
 
 
-# ============================================================
-# BEWERBUNG
-# ============================================================
+# =========================================================
+# BEWERBUNGEN
+# =========================================================
 
-class ApplicationModal(
-    discord.ui.Modal,
-    title="Developer Bewerbung"
-):
-
-    reason = discord.ui.TextInput(
-        label="Warum möchtest du Developer werden?",
-        style=discord.TextStyle.paragraph,
-        max_length=1500,
+class ApplicationModal(discord.ui.Modal, title="Bewerbung"):
+    name_input = discord.ui.TextInput(
+        label="Name",
+        placeholder="Dein Name",
+        max_length=100,
         required=True
     )
 
-    experience = discord.ui.TextInput(
-        label="Welche Erfahrung hast du?",
+    age_input = discord.ui.TextInput(
+        label="Alter",
+        placeholder="Dein Alter",
+        max_length=3,
+        required=True
+    )
+
+    text_input = discord.ui.TextInput(
+        label="Bewerbung",
+        placeholder="Warum möchtest du dich bewerben?",
         style=discord.TextStyle.paragraph,
         max_length=1500,
         required=True
@@ -1551,379 +1050,621 @@ class ApplicationModal(
         self,
         interaction: discord.Interaction
     ):
-
-        channel = get_channel(
+        review_channel = get_channel(
             REVIEW_CHANNEL_ID
         )
 
-        if channel is None:
-            channel = get_channel(
-                APPLICATION_CHANNEL_ID
-            )
-
-        if channel is None:
-
+        if review_channel is None:
             await interaction.response.send_message(
-                "❌ Bewerbungs-Kanal nicht gefunden.",
+                "❌ Der Bewerbungs-Kanal wurde nicht gefunden.",
                 ephemeral=True
             )
             return
 
         embed = discord.Embed(
-            title="🧑‍💻 Neue Developer-Bewerbung",
-            color=discord.Color.orange(),
-            timestamp=now()
+            title="📨 Neue Bewerbung",
+            color=discord.Color.blurple(),
+            timestamp=datetime.now(timezone.utc)
         )
 
         embed.add_field(
-            name="Bewerber",
-            value=(
-                f"{interaction.user.mention}\n"
-                f"`{interaction.user.id}`"
-            ),
+            name="Discord",
+            value=f"{interaction.user.mention}\n`{interaction.user.id}`",
             inline=False
         )
 
         embed.add_field(
-            name="Warum Developer?",
-            value=str(
-                self.reason.value
-            ),
-            inline=False
+            name="Name",
+            value=self.name_input.value,
+            inline=True
         )
 
         embed.add_field(
-            name="Erfahrung",
-            value=str(
-                self.experience.value
-            ),
+            name="Alter",
+            value=self.age_input.value,
+            inline=True
+        )
+
+        embed.add_field(
+            name="Bewerbung",
+            value=self.text_input.value,
             inline=False
         )
 
-        await channel.send(
+        embed.set_footer(
+            text="RLP Bewerbungssystem"
+        )
+
+        await safe_send(
+            review_channel,
             embed=embed
         )
 
         await interaction.response.send_message(
-            "✅ Deine Bewerbung wurde abgeschickt.",
+            "✅ Deine Bewerbung wurde erfolgreich eingereicht.",
             ephemeral=True
         )
 
 
-class ApplicationView(
-    discord.ui.View
-):
-
+class ApplicationView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
     @discord.ui.button(
-        label="Developer Bewerbung",
+        label="Bewerben",
+        emoji="📨",
         style=discord.ButtonStyle.primary,
-        emoji="🧑‍💻",
-        custom_id="rlp_application"
+        custom_id="rlp_application_open"
     )
     async def apply(
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button
     ):
-
         await interaction.response.send_modal(
             ApplicationModal()
         )
 
 
-async def send_application_panel():
+def create_application_embed():
+    embed = discord.Embed(
+        title="📨 Bewerbung",
+        description=(
+            "Du möchtest dich bei RLP bewerben?\n\n"
+            "Klicke auf **Bewerben** und fülle das Formular aus."
+        ),
+        color=discord.Color.blurple()
+    )
+
+    embed.set_footer(
+        text=PANEL_MARKER + "application"
+    )
+
+    return embed
+
+
+# =========================================================
+# PANEL SYSTEM
+# =========================================================
+
+async def upsert_panel(
+    channel_id,
+    embed,
+    view
+):
+    channel = get_channel(channel_id)
+
+    if channel is None:
+        print(f"[PANEL] Channel nicht gefunden: {channel_id}")
+        return
+
+    marker = get_panel_marker_from_embed(embed)
+
+    if marker is None:
+        print("[PANEL] Kein Marker vorhanden.")
+        return
+
+    existing_message = None
+
+    try:
+        async for message in channel.history(limit=200):
+            if not message.author.bot:
+                continue
+
+            if get_panel_marker(message) == marker:
+                existing_message = message
+                break
+
+    except discord.HTTPException as error:
+        print(f"[PANEL] History-Fehler: {error}")
+
+    if existing_message:
+        try:
+            await existing_message.edit(
+                embed=embed,
+                view=view
+            )
+            return
+        except discord.HTTPException:
+            pass
+
+    await safe_send(
+        channel,
+        embed=embed,
+        view=view
+    )
+
+
+def get_panel_marker_from_embed(embed):
+    if not embed.footer:
+        return None
+
+    footer = embed.footer.text or ""
+
+    if footer.startswith(PANEL_MARKER):
+        return footer
+
+    return None
+
+
+async def clean_old_panels():
+    panel_channels = [
+        QUIZ_CHANNEL_ID,
+        APPLICATION_CHANNEL_ID,
+        NICKNAME_CHANNEL_ID,
+        DEVELOPER_TASK_CHANNEL_ID,
+        DEVELOPER_SHIFT_CHANNEL_ID
+    ]
+
+    seen = set()
+
+    for channel_id in panel_channels:
+        if channel_id in seen:
+            continue
+
+        seen.add(channel_id)
+
+        channel = get_channel(channel_id)
+
+        if channel is None:
+            continue
+
+        try:
+            async for message in channel.history(limit=200):
+                if not message.author.bot:
+                    continue
+
+                marker = get_panel_marker(message)
+
+                if marker:
+                    try:
+                        await message.delete()
+                    except discord.HTTPException:
+                        pass
+
+        except discord.HTTPException as error:
+            print(f"[PANEL] Cleanup-Fehler: {error}")
+
+
+async def send_all_panels():
+    await upsert_panel(
+        NICKNAME_CHANNEL_ID,
+        create_nametag_embed(),
+        NametagView()
+    )
+
+    await upsert_panel(
+        APPLICATION_CHANNEL_ID,
+        create_application_embed(),
+        ApplicationView()
+    )
+
+    await upsert_panel(
+        DEVELOPER_TASK_CHANNEL_ID,
+        create_task_embed(),
+        TaskView()
+    )
+
+    await upsert_panel(
+        DEVELOPER_SHIFT_CHANNEL_ID,
+        create_shift_embed(),
+        ShiftView()
+    )
+
+    await update_license_plate_panel()
+
+
+async def update_license_plate_panel():
+    # Kennzeichen-Panel wird im Nametag-Channel abgelegt,
+    # falls kein eigener Kennzeichen-Channel vorhanden ist.
+    await upsert_panel(
+        NICKNAME_CHANNEL_ID,
+        create_license_plate_embed(),
+        PlateView()
+    )
+
+
+async def update_task_panel():
+    await upsert_panel(
+        DEVELOPER_TASK_CHANNEL_ID,
+        create_task_embed(),
+        TaskView()
+    )
+
+
+# =========================================================
+# EMOJI QUIZ
+# =========================================================
+
+QUIZ_POOL = [
+    {
+        "emoji": "🚗⛽",
+        "answer": "Tanken",
+        "options": ["Tanken", "Waschen", "Parken", "Reparieren"]
+    },
+    {
+        "emoji": "🚓🚨",
+        "answer": "Polizei",
+        "options": ["Polizei", "Feuerwehr", "Abschleppdienst", "Taxi"]
+    },
+    {
+        "emoji": "🚒🔥",
+        "answer": "Feuerwehr",
+        "options": ["Polizei", "Feuerwehr", "Rettungsdienst", "Werkstatt"]
+    },
+    {
+        "emoji": "🚑🏥",
+        "answer": "Rettungsdienst",
+        "options": ["Taxi", "Rettungsdienst", "Polizei", "Werkstatt"]
+    },
+    {
+        "emoji": "🔧🚗",
+        "answer": "Werkstatt",
+        "options": ["Werkstatt", "Tankstelle", "Polizei", "Parkhaus"]
+    },
+    {
+        "emoji": "🅿️🚗",
+        "answer": "Parken",
+        "options": ["Tanken", "Parken", "Waschen", "Fahren"]
+    },
+    {
+        "emoji": "🚦🔴",
+        "answer": "Rote Ampel",
+        "options": ["Grüne Ampel", "Rote Ampel", "Baustelle", "Stoppschild"]
+    },
+    {
+        "emoji": "🛑🚗",
+        "answer": "Stoppschild",
+        "options": ["Stoppschild", "Vorfahrt", "Kreisverkehr", "Ampel"]
+    },
+    {
+        "emoji": "🔄🚘",
+        "answer": "Kreisverkehr",
+        "options": ["Kreisverkehr", "Autobahn", "Parkplatz", "Tankstelle"]
+    },
+    {
+        "emoji": "🚘💨",
+        "answer": "Schnell fahren",
+        "options": ["Schnell fahren", "Parken", "Tanken", "Waschen"]
+    }
+]
+
+
+def create_quiz_embed(question):
+    embed = discord.Embed(
+        title="🧠 RLP Emoji Quiz",
+        description=(
+            "Errate den Begriff anhand der Emojis.\n\n"
+            f"## {question['emoji']}\n\n"
+            "Wähle die richtige Antwort über die Buttons."
+        ),
+        color=discord.Color.blurple()
+    )
+
+    embed.set_footer(
+        text="RLP Emoji Quiz • Neue Frage automatisch"
+    )
+
+    return embed
+
+
+class QuizView(discord.ui.View):
+    def __init__(self, question):
+        super().__init__(timeout=30)
+
+        options = question["options"][:]
+
+        for index, option in enumerate(options):
+            button = discord.ui.Button(
+                label=option,
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"rlp_quiz_{index}"
+            )
+
+            async def callback(
+                interaction: discord.Interaction,
+                selected=option
+            ):
+                await handle_quiz_answer(
+                    interaction,
+                    selected,
+                    question
+                )
+
+            button.callback = callback
+            self.add_item(button)
+
+
+async def handle_quiz_answer(
+    interaction,
+    selected,
+    question
+):
+    global quiz_message_id
+    global current_quiz
+
+    async with quiz_lock:
+        if current_quiz is None:
+            await interaction.response.send_message(
+                "⚠️ Dieses Quiz ist bereits beendet.",
+                ephemeral=True
+            )
+            return
+
+        if current_quiz["answer"] != question["answer"]:
+            await interaction.response.send_message(
+                "❌ Falsch! Versuch es bei der nächsten Frage erneut.",
+                ephemeral=True
+            )
+            return
+
+        user_id = str(interaction.user.id)
+
+        data["quiz_scores"][user_id] = (
+            data["quiz_scores"].get(user_id, 0) + 1
+        )
+
+        save_data()
+
+        quiz_message_id = None
+        current_quiz = None
+
+        await interaction.response.send_message(
+            "✅ Richtig! Du bekommst einen Punkt.",
+            ephemeral=True
+        )
+
+        old_message = interaction.message
+
+        try:
+            await old_message.delete()
+        except discord.HTTPException:
+            pass
+
+    await asyncio.sleep(1)
+
+    await send_new_quiz()
+
+
+async def send_new_quiz():
+    global quiz_message_id
+    global current_quiz
 
     channel = get_channel(
-        APPLICATION_CHANNEL_ID
+        QUIZ_CHANNEL_ID
+    )
+
+    if channel is None:
+        return
+
+    async with quiz_lock:
+        question = random.choice(QUIZ_POOL)
+
+        current_quiz = question
+
+        try:
+            message = await channel.send(
+                embed=create_quiz_embed(question),
+                view=QuizView(question)
+            )
+
+            quiz_message_id = message.id
+
+        except discord.HTTPException as error:
+            print(f"[QUIZ] Fehler beim Senden: {error}")
+            current_quiz = None
+            quiz_message_id = None
+
+
+async def clear_quiz_channel():
+    global quiz_message_id
+    global current_quiz
+
+    channel = get_channel(
+        QUIZ_CHANNEL_ID
+    )
+
+    if channel is None:
+        return
+
+    quiz_message_id = None
+    current_quiz = None
+
+    try:
+        async for message in channel.history(limit=None):
+            try:
+                await message.delete()
+            except discord.HTTPException:
+                pass
+
+    except discord.HTTPException as error:
+        print(f"[QUIZ] Cleanup-Fehler: {error}")
+
+
+async def quiz_cleanup_loop():
+    global quiz_message_id
+
+    await bot.wait_until_ready()
+
+    while not bot.is_closed():
+        try:
+            channel = get_channel(
+                QUIZ_CHANNEL_ID
+            )
+
+            if channel is not None:
+                active_id = quiz_message_id
+
+                async for message in channel.history(limit=None):
+                    if active_id is not None and message.id == active_id:
+                        continue
+
+                    try:
+                        await message.delete()
+                    except discord.HTTPException:
+                        pass
+
+        except Exception as error:
+            print(f"[QUIZ CLEANUP] Fehler: {error}")
+
+        await asyncio.sleep(5)
+
+
+# =========================================================
+# SUPPORT VOICE LOG
+# =========================================================
+
+async def send_support_voice_log(
+    member,
+    action
+):
+    channel = get_channel(
+        SUPPORT_LOG_CHANNEL_ID
     )
 
     if channel is None:
         return
 
     embed = discord.Embed(
-        title="🧑‍💻 Developer Bewerbung",
-        description=(
-            "Du möchtest Teil des Developer-Teams werden?\n\n"
-            "Klicke auf den Button und fülle die Bewerbung "
-            "vollständig aus."
-        ),
-        color=discord.Color.blurple()
+        title="🎧 Support Voice",
+        color=discord.Color.blurple(),
+        timestamp=datetime.now(timezone.utc)
     )
 
-    await upsert_panel(
+    embed.add_field(
+        name="Benutzer",
+        value=f"{member.mention}\n`{member.id}`",
+        inline=False
+    )
+
+    embed.add_field(
+        name="Aktion",
+        value=action,
+        inline=False
+    )
+
+    embed.add_field(
+        name="Channel",
+        value=f"<#{SUPPORT_VOICE_CHANNEL_ID}>",
+        inline=False
+    )
+
+    await safe_send(
         channel,
-        embed,
-        ApplicationView(),
-        "application"
+        embed=embed
     )
 
 
-# ============================================================
-# EMOJI-QUIZ
-# ============================================================
+# =========================================================
+# EVENTS
+# =========================================================
 
-QUIZZES = [
-    {
-        "emoji": "🇩🇪",
-        "question": "Wie viele Bundesländer hat Deutschland?",
-        "answers": ["16", "sechzehn"]
-    },
-    {
-        "emoji": "🗼",
-        "question": "Welche Stadt wird durch den Eiffelturm dargestellt?",
-        "answers": ["paris"]
-    },
-    {
-        "emoji": "🍕🇮🇹",
-        "question": "Aus welchem Land stammt die Pizza ursprünglich?",
-        "answers": ["italien", "italy"]
-    },
-    {
-        "emoji": "🌍",
-        "question": "Wie heißt der Planet, auf dem wir leben?",
-        "answers": ["erde", "earth"]
-    },
-    {
-        "emoji": "☀️",
-        "question": "Wie heißt unser Stern?",
-        "answers": ["sonne", "sun"]
-    },
-    {
-        "emoji": "🐘",
-        "question": "Welches Tier ist für seinen langen Rüssel bekannt?",
-        "answers": ["elefant", "elefant"]
-    },
-    {
-        "emoji": "🏰🇫🇷",
-        "question": "In welchem Land liegt Paris?",
-        "answers": ["frankreich", "france"]
-    },
-    {
-        "emoji": "🚗",
-        "question": "Wie viele Räder hat ein normales Auto?",
-        "answers": ["4", "vier"]
-    },
-    {
-        "emoji": "🌊",
-        "question": "Wie heißt der größte Ozean der Erde?",
-        "answers": ["pazifik", "pazifischer ozean"]
-    },
-    {
-        "emoji": "🪐",
-        "question": "Welcher Planet ist für seine auffälligen Ringe bekannt?",
-        "answers": ["saturn"]
-    }
-]
+@bot.event
+async def on_ready():
+    global startup_finished
+    global quiz_cleanup_task
 
-quiz_pool = []
+    print(f"Bot online: {bot.user}")
 
+    guild = bot.get_guild(GUILD_ID)
 
-def refill_quiz():
-    global quiz_pool
-
-    quiz_pool = QUIZZES.copy()
-    random.shuffle(quiz_pool)
-
-
-async def clear_quiz_channel():
-
-    channel = get_channel(
-        QUIZ_CHANNEL_ID
-    )
-
-    if channel is None:
+    if guild is None:
+        print("[STARTUP] Server nicht gefunden.")
         return
 
-    try:
-
-        async for message in channel.history(
-            limit=None
-        ):
-            await safe_delete(message)
-
-    except Exception as error:
-        print(
-            f"[QUIZ] Fehler beim Leeren: {error}"
-        )
-
-
-async def send_new_quiz():
-
-    global quiz_message_id
-    global current_quiz
-
-    channel = get_channel(
-        QUIZ_CHANNEL_ID
-    )
-
-    if channel is None:
+    if startup_finished:
         return
 
-    async with quiz_lock:
+    startup_finished = True
 
-        if not quiz_pool:
-            refill_quiz()
+    # Persistente Views registrieren.
+    bot.add_view(NametagView())
+    bot.add_view(PlateView())
+    bot.add_view(ShiftView())
+    bot.add_view(TaskView())
+    bot.add_view(ApplicationView())
 
-        quiz = quiz_pool.pop()
+    # Alte Panels entfernen.
+    await clean_old_panels()
 
-        current_quiz = quiz
+    # Alle Panels neu erstellen.
+    await send_all_panels()
 
-        embed = discord.Embed(
-            title="🧩 RLP Emoji Quiz",
-            description=(
-                f"# {quiz['emoji']}\n\n"
-                f"### {quiz['question']}\n\n"
-                "💬 **Schreibe deine Antwort in den Kanal.**\n"
-                "⏱️ Der Quiz-Kanal wird automatisch sauber gehalten."
-            ),
-            color=discord.Color.blurple()
-        )
+    # Nametags wiederherstellen.
+    for member in guild.members:
+        if member.bot:
+            continue
 
-        embed.set_footer(
-            text="RLP • Emoji Quiz"
-        )
+        if not is_nametag_opted_out(member.id):
+            await apply_nametag(member)
 
-        message = await channel.send(
-            embed=embed
-        )
+    # Aktive Schichten wiederherstellen.
+    active_role = guild.get_role(
+        DEVELOPER_SHIFT_ROLE_ID
+    )
 
-        quiz_message_id = message.id
-
-
-async def quiz_cleanup_loop():
-
-    global quiz_message_id
-
-    await bot.wait_until_ready()
-
-    while not bot.is_closed():
-
-        channel = get_channel(
-            QUIZ_CHANNEL_ID
-        )
-
-        if channel is not None:
-
+    if active_role is not None:
+        for user_id in list(data["developer_shifts"].keys()):
             try:
+                member = guild.get_member(
+                    int(user_id)
+                )
 
-                async with quiz_lock:
+                if member is None:
+                    continue
 
-                    keep_id = quiz_message_id
-
-                    async for message in channel.history(
-                        limit=None
-                    ):
-
-                        if (
-                            keep_id is not None
-                            and message.id == keep_id
-                        ):
-                            continue
-
-                        await safe_delete(message)
+                if active_role not in member.roles:
+                    await member.add_roles(
+                        active_role,
+                        reason="RLP aktive Schicht wiederhergestellt"
+                    )
 
             except Exception as error:
                 print(
-                    f"[QUIZ CLEANUP] {error}"
+                    f"[SHIFT] Wiederherstellungsfehler: {error}"
                 )
 
-        await asyncio.sleep(5)
+    # Quiz komplett leeren und neues Quiz starten.
+    await clear_quiz_channel()
+    await send_new_quiz()
+
+    if quiz_cleanup_task is None or quiz_cleanup_task.done():
+        quiz_cleanup_task = asyncio.create_task(
+            quiz_cleanup_loop()
+        )
+
+    print("[STARTUP] Alle Systeme geladen.")
 
 
-async def handle_quiz_message(message):
-
-    global quiz_message_id
-    global current_quiz
-
-    if message.author.bot:
+@bot.event
+async def on_member_join(member):
+    if member.guild.id != GUILD_ID:
         return
 
-    async with quiz_lock:
+    if member.bot:
+        return
 
-        if current_quiz is None:
-            return
-
-        if (
-            quiz_message_id is None
-            or message.id == quiz_message_id
-        ):
-            return
-
-        answer = (
-            message.content
-            .strip()
-            .lower()
-        )
-
-        correct_answers = [
-            str(answer).lower()
-            for answer in current_quiz[
-                "answers"
-            ]
-        ]
-
-        if answer not in correct_answers:
-            return
-
-        user_id = str(
-            message.author.id
-        )
-
-        data["quiz_scores"][user_id] = (
-            data["quiz_scores"].get(
-                user_id,
-                0
-            ) + 1
-        )
-
-        save_data()
-
-        old_message_id = quiz_message_id
-
-        try:
-
-            await message.delete()
-
-        except (
-            discord.NotFound,
-            discord.Forbidden,
-            discord.HTTPException
-        ):
-            pass
-
-        if old_message_id:
-
-            try:
-
-                old_message = await message.channel.fetch_message(
-                    old_message_id
-                )
-
-                await old_message.delete()
-
-            except (
-                discord.NotFound,
-                discord.Forbidden,
-                discord.HTTPException
-            ):
-                pass
-
-        quiz_message_id = None
-        current_quiz = None
-
-        await asyncio.sleep(1)
-
-        await send_new_quiz()
-
-
-# ============================================================
-# SUPPORT-LOG
-# ============================================================
-
-support_cases = {}
+    await apply_nametag(member)
 
 
 @bot.event
@@ -1932,410 +1673,99 @@ async def on_voice_state_update(
     before,
     after
 ):
-
     if member.bot:
         return
 
-    # Betritt Support
-    if (
-        after.channel
-        and after.channel.id == SUPPORT_VOICE_CHANNEL_ID
-        and (
-            before.channel is None
-            or before.channel.id != SUPPORT_VOICE_CHANNEL_ID
-        )
-    ):
+    support_channel_id = SUPPORT_VOICE_CHANNEL_ID
 
-        data["support_case_counter"] += 1
+    joined_support = (
+        after.channel is not None
+        and after.channel.id == support_channel_id
+    )
 
-        case_id = data[
-            "support_case_counter"
-        ]
+    left_support = (
+        before.channel is not None
+        and before.channel.id == support_channel_id
+    )
 
-        support_cases[str(member.id)] = {
-            "case": case_id,
-            "started_at": now_text()
-        }
-
-        save_data()
-
-        log_channel = get_channel(
-            SUPPORT_LOG_CHANNEL_ID
+    if joined_support and not left_support:
+        await send_support_voice_log(
+            member,
+            "🟢 Support-Voice betreten"
         )
 
-        if log_channel:
-
-            embed = discord.Embed(
-                title="📞 Support gestartet",
-                description=(
-                    f"{member.mention} ist dem Support beigetreten."
-                ),
-                color=discord.Color.green(),
-                timestamp=now()
-            )
-
-            embed.add_field(
-                name="Fall",
-                value=f"#{case_id}",
-                inline=True
-            )
-
-            embed.add_field(
-                name="Start",
-                value=now_text(),
-                inline=True
-            )
-
-            await log_channel.send(
-                embed=embed
-            )
-
-    # Verlässt Support
-    if (
-        before.channel
-        and before.channel.id == SUPPORT_VOICE_CHANNEL_ID
-        and (
-            after.channel is None
-            or after.channel.id != SUPPORT_VOICE_CHANNEL_ID
-        )
-    ):
-
-        case = support_cases.pop(
-            str(member.id),
-            None
+    elif left_support and not joined_support:
+        await send_support_voice_log(
+            member,
+            "🔴 Support-Voice verlassen"
         )
 
-        if case:
-
-            log_channel = get_channel(
-                SUPPORT_LOG_CHANNEL_ID
-            )
-
-            if log_channel:
-
-                embed = discord.Embed(
-                    title="📞 Support beendet",
-                    description=(
-                        f"{member.mention} hat den Support verlassen."
-                    ),
-                    color=discord.Color.red(),
-                    timestamp=now()
-                )
-
-                embed.add_field(
-                    name="Fall",
-                    value=f"#{case['case']}",
-                    inline=True
-                )
-
-                embed.add_field(
-                    name="Start",
-                    value=case.get(
-                        "started_at",
-                        "Unbekannt"
-                    ),
-                    inline=False
-                )
-
-                embed.add_field(
-                    name="Ende",
-                    value=now_text(),
-                    inline=False
-                )
-
-                await log_channel.send(
-                    embed=embed
-                )
-
-
-# ============================================================
-# NACHRICHTEN
-# ============================================================
 
 @bot.event
 async def on_message(message):
-
     if message.author.bot:
         return
 
-    if (
-        message.guild
-        and message.guild.id == GUILD_ID
-        and message.channel.id == QUIZ_CHANNEL_ID
-    ):
-
-        await handle_quiz_message(
-            message
-        )
-
+    if message.guild is None:
+        await bot.process_commands(message)
         return
 
-    await bot.process_commands(
-        message
-    )
-
-
-# ============================================================
-# MEMBER JOIN
-# ============================================================
-
-@bot.event
-async def on_member_join(member):
-
-    if member.guild.id != GUILD_ID:
+    if message.guild.id != GUILD_ID:
+        await bot.process_commands(message)
         return
 
-    if str(member.id) in [
-        str(x)
-        for x in data.get(
-            "nametag_opt_out",
-            []
-        )
-    ]:
-        return
+    if message.channel.id == QUIZ_CHANNEL_ID:
+        # Quiz-Nachrichten werden vom Cleanup-Loop entfernt.
+        # Die aktive Quiz-Nachricht bleibt bestehen.
+        pass
 
-    await apply_nametag(
-        member
-    )
+    await bot.process_commands(message)
 
 
-# ============================================================
+# =========================================================
 # COMMANDS
-# ============================================================
+# =========================================================
 
-@bot.command(name="score")
-async def score(ctx):
-
-    user_id = str(
-        ctx.author.id
+@bot.command()
+async def ping(ctx):
+    await ctx.send(
+        f"🏓 Pong! `{round(bot.latency * 1000)}ms`"
     )
 
-    value = data[
-        "quiz_scores"
-    ].get(
-        user_id,
+
+@bot.command()
+async def quizscore(ctx):
+    score = data["quiz_scores"].get(
+        str(ctx.author.id),
         0
     )
 
     await ctx.send(
-        f"🧩 {ctx.author.mention} hat "
-        f"**{value} Punkte** im Emoji-Quiz.",
-        delete_after=10
+        f"🧠 {ctx.author.mention}, dein Quiz-Score ist **{score}**."
     )
 
 
-# ============================================================
-# READY
-# ============================================================
+@bot.command()
+async def kennzeichen(ctx):
+    plate = get_user_plate(ctx.author.id)
 
-@bot.event
-async def on_ready():
-
-    global startup_finished
-    global quiz_cleanup_task
-
-    if startup_finished:
-        return
-
-    print(
-        f"[START] Eingeloggt als {bot.user}"
-    )
-
-    guild = get_guild()
-
-    if guild is None:
-
-        print(
-            "[START] Server nicht gefunden."
+    if plate:
+        await ctx.send(
+            f"🚘 Dein Kennzeichen ist **{plate}**."
+        )
+    else:
+        await ctx.send(
+            "🚘 Du hast noch kein Kennzeichen registriert."
         )
 
-        return
 
-    load_data()
-
-    # --------------------------------------------------------
-    # Persistent Views
-    # --------------------------------------------------------
-
-    bot.add_view(
-        NametagView()
-    )
-
-    bot.add_view(
-        PlateView()
-    )
-
-    bot.add_view(
-        TeamView()
-    )
-
-    bot.add_view(
-        ShiftView()
-    )
-
-    bot.add_view(
-        TaskView()
-    )
-
-    bot.add_view(
-        ApplicationView()
-    )
-
-    # --------------------------------------------------------
-    # Alte Panels sauber entfernen
-    # --------------------------------------------------------
-
-    await delete_old_panels()
-
-    # --------------------------------------------------------
-    # Quiz sauber starten
-    # --------------------------------------------------------
-
-    await clear_quiz_channel()
-
-    refill_quiz()
-
-    await send_new_quiz()
-
-    # --------------------------------------------------------
-    # Panels erstellen
-    # --------------------------------------------------------
-
-    await send_nametag_panel()
-
-    await send_team_panel()
-
-    await send_license_plate_panel()
-
-    await send_shift_panel()
-
-    await send_task_panel()
-
-    await send_application_panel()
-
-    # --------------------------------------------------------
-    # Nametags wiederherstellen
-    # --------------------------------------------------------
-
-    opt_out = {
-        str(x)
-        for x in data.get(
-            "nametag_opt_out",
-            []
-        )
-    }
-
-    for member in guild.members:
-
-        if member.bot:
-            continue
-
-        if str(member.id) in opt_out:
-            continue
-
-        await apply_nametag(
-            member
-        )
-
-    # --------------------------------------------------------
-    # Aktive Schichten wiederherstellen
-    # --------------------------------------------------------
-
-    shift_role = get_role(
-        guild,
-        DEVELOPER_SHIFT_ROLE_ID
-    )
-
-    if shift_role:
-
-        for user_id in list(
-            data.get(
-                "developer_shifts",
-                {}
-            ).keys()
-        ):
-
-            try:
-
-                member = guild.get_member(
-                    int(user_id)
-                )
-
-                if member is None:
-                    continue
-
-                if shift_role not in member.roles:
-
-                    await member.add_roles(
-                        shift_role,
-                        reason=(
-                            "Aktive Schicht "
-                            "nach Bot-Neustart wiederhergestellt"
-                        )
-                    )
-
-            except (
-                discord.Forbidden,
-                discord.HTTPException
-            ):
-                pass
-
-    # --------------------------------------------------------
-    # Quiz Cleanup starten
-    # --------------------------------------------------------
-
-    if (
-        quiz_cleanup_task is None
-        or quiz_cleanup_task.done()
-    ):
-
-        quiz_cleanup_task = asyncio.create_task(
-            quiz_cleanup_loop()
-        )
-
-    startup_finished = True
-
-    print(
-        "[START] Bot vollständig gestartet."
-    )
-
-
-# ============================================================
-# COMMAND FEHLER
-# ============================================================
-
-@bot.event
-async def on_command_error(
-    ctx,
-    error
-):
-
-    if isinstance(
-        error,
-        commands.CommandNotFound
-    ):
-        return
-
-    print(
-        f"[COMMAND] {error}"
-    )
-
-
-# ============================================================
+# =========================================================
 # START
-# ============================================================
+# =========================================================
 
-if __name__ == "__main__":
-
-    if not TOKEN:
-        raise RuntimeError(
-            "DISCORD_TOKEN wurde nicht gefunden."
-        )
-
-    load_data()
-
-    print(
-        "[START] Bot wird gestartet..."
+if not TOKEN:
+    raise RuntimeError(
+        "DISCORD_TOKEN wurde nicht gefunden."
     )
 
-    bot.run(TOKEN)
+bot.run(TOKEN)
