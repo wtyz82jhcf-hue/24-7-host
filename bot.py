@@ -109,10 +109,6 @@ load_data()
 # HILFSFUNKTIONEN
 # =========================================================
 
-def get_guild():
-    return bot.get_guild(GUILD_ID)
-
-
 def has_role(member, role_id):
     return any(role.id == role_id for role in member.roles)
 
@@ -130,7 +126,11 @@ async def safe_send(channel, *args, **kwargs):
 async def safe_delete(message):
     try:
         await message.delete()
-    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+    except (
+        discord.NotFound,
+        discord.Forbidden,
+        discord.HTTPException
+    ):
         pass
 
 
@@ -146,23 +146,15 @@ def remove_all_nametags(name):
 
 
 def make_nametag(name):
-    name = remove_all_nametags(name)
+    clean_name = remove_all_nametags(name)
 
-    if not name:
-        name = "User"
+    if not clean_name:
+        clean_name = "User"
 
-    return (NAMETAG + name)[:32]
+    return (NAMETAG + clean_name)[:32]
 
 
 async def update_member_nametag(member):
-    """
-    WICHTIG:
-
-    Diese Funktion VERGIBT KEINE Rolle.
-
-    Sie reagiert ausschließlich darauf,
-    ob die Nametag-Rolle bereits vorhanden ist.
-    """
 
     if member.bot:
         return
@@ -182,11 +174,9 @@ async def update_member_nametag(member):
             else member.name
         )
 
-        # Bereits korrekt
         if current_name.startswith(NAMETAG):
             return
 
-        # Original speichern
         if user_id not in data["nametag_original_names"]:
             data["nametag_original_names"][user_id] = member.nick
 
@@ -200,7 +190,10 @@ async def update_member_nametag(member):
 
             save_data()
 
-        except (discord.Forbidden, discord.HTTPException):
+        except (
+            discord.Forbidden,
+            discord.HTTPException
+        ):
             pass
 
     else:
@@ -213,9 +206,9 @@ async def update_member_nametag(member):
         if not current_nick.startswith(NAMETAG):
             return
 
-        original_nick = data["nametag_original_names"].get(
-            user_id
-        )
+        original_nick = data[
+            "nametag_original_names"
+        ].get(user_id)
 
         try:
             await member.edit(
@@ -223,21 +216,102 @@ async def update_member_nametag(member):
                 reason="Nametag-Rolle entfernt"
             )
 
-            data["nametag_original_names"].pop(
-                user_id,
-                None
-            )
+            data[
+                "nametag_original_names"
+            ].pop(user_id, None)
 
             save_data()
 
-        except (discord.Forbidden, discord.HTTPException):
+        except (
+            discord.Forbidden,
+            discord.HTTPException
+        ):
             pass
+
+
+class NametagResetButton(Button):
+
+    def __init__(self):
+        super().__init__(
+            label="Nametag zurücksetzen",
+            style=discord.ButtonStyle.danger,
+            emoji="🔄",
+            custom_id="rlp_nametag_reset"
+        )
+
+    async def callback(self, interaction):
+
+        member = interaction.guild.get_member(
+            interaction.user.id
+        )
+
+        if member is None:
+            await interaction.response.send_message(
+                "❌ Benutzer nicht gefunden.",
+                ephemeral=True
+            )
+            return
+
+        current_name = (
+            member.nick
+            if member.nick is not None
+            else member.name
+        )
+
+        if not current_name.startswith(NAMETAG):
+
+            await interaction.response.send_message(
+                "ℹ️ Dein Name hat aktuell keinen Nametag.",
+                ephemeral=True
+            )
+            return
+
+        clean_name = remove_all_nametags(
+            current_name
+        )
+
+        if not clean_name:
+            clean_name = member.name
+
+        try:
+
+            await member.edit(
+                nick=clean_name[:32],
+                reason="Nametag manuell zurückgesetzt"
+            )
+
+            data[
+                "nametag_original_names"
+            ].pop(str(member.id), None)
+
+            save_data()
+
+            await interaction.response.send_message(
+                "✅ Dein Nametag wurde zurückgesetzt.",
+                ephemeral=True
+            )
+
+        except discord.Forbidden:
+
+            await interaction.response.send_message(
+                "❌ Ich kann deinen Namen nicht ändern. "
+                "Meine Rolle muss über deiner höchsten Rolle stehen.",
+                ephemeral=True
+            )
+
+        except discord.HTTPException:
+
+            await interaction.response.send_message(
+                "❌ Der Name konnte nicht geändert werden.",
+                ephemeral=True
+            )
 
 
 class NametagView(View):
 
     def __init__(self):
         super().__init__(timeout=None)
+        self.add_item(NametagResetButton())
 
 
 async def update_nametag_panel():
@@ -254,6 +328,7 @@ async def update_nametag_panel():
     existing = None
 
     try:
+
         async for message in channel.history(limit=100):
 
             if message.author.id != bot.user.id:
@@ -263,20 +338,27 @@ async def update_nametag_panel():
                 continue
 
             if message.embeds[0].footer.text == marker:
-                existing = message
-                break
 
-    except (discord.Forbidden, discord.HTTPException):
+                if existing is None:
+                    existing = message
+                else:
+                    await safe_delete(message)
+
+    except (
+        discord.Forbidden,
+        discord.HTTPException
+    ):
         return
 
     embed = discord.Embed(
         title="🏷️ RLP Nametag",
         description=(
-            "Das Nametag-System wird über die vorhandene Rolle gesteuert.\n\n"
-            f"Wenn du die Nametag-Rolle besitzt, wird automatisch "
+            "Der Nametag wird über die vorhandene Rolle gesteuert.\n\n"
+            f"Mit der Nametag-Rolle wird automatisch "
             f"`{NAMETAG}` vor deinen Namen gesetzt.\n\n"
-            "Wenn die Rolle entfernt wird, wird der Nametag wieder entfernt.\n\n"
-            "⚠️ Der Bot vergibt die Nametag-Rolle nicht."
+            "🔄 Mit **Nametag zurücksetzen** kannst du "
+            "deinen Nametag jederzeit selbst entfernen.\n\n"
+            "⚠️ Der Bot vergibt die Nametag-Rolle niemals."
         ),
         color=discord.Color.gold()
     )
@@ -290,10 +372,14 @@ async def update_nametag_panel():
                 embed=embed,
                 view=NametagView()
             )
-        except (discord.Forbidden, discord.HTTPException):
+        except (
+            discord.Forbidden,
+            discord.HTTPException
+        ):
             pass
 
     else:
+
         await safe_send(
             channel,
             embed=embed,
@@ -309,20 +395,20 @@ license_lock = asyncio.Lock()
 
 
 def get_plate_number(plate):
+
     parts = plate.strip().upper().split()
 
     if len(parts) < 2:
         return None
 
-    number = parts[-1]
-
-    if not number.isdigit():
+    if not parts[-1].isdigit():
         return None
 
-    return number
+    return parts[-1]
 
 
 def valid_plate(plate):
+
     parts = plate.strip().upper().split()
 
     if len(parts) < 2:
@@ -332,15 +418,21 @@ def valid_plate(plate):
         return False
 
     for part in parts[:-1]:
+
         if not part.isalnum():
             return False
 
     return True
 
 
-def plate_number_exists(number, except_user_id=None):
+def plate_number_exists(
+    number,
+    except_user_id=None
+):
 
-    for user_id, plate in data["license_plates"].items():
+    for user_id, plate in data[
+        "license_plates"
+    ].items():
 
         if (
             except_user_id is not None
@@ -352,6 +444,31 @@ def plate_number_exists(number, except_user_id=None):
             return True
 
     return False
+
+
+def get_plate_list():
+
+    plates = []
+
+    for user_id, plate in data[
+        "license_plates"
+    ].items():
+
+        plates.append(
+            (
+                str(user_id),
+                plate
+            )
+        )
+
+    plates.sort(
+        key=lambda item: (
+            get_plate_number(item[1]) or "",
+            item[1]
+        )
+    )
+
+    return plates
 
 
 class LicensePlateModal(
@@ -372,21 +489,31 @@ class LicensePlateModal(
 
         async with license_lock:
 
-            if user_id in data["license_plates"]:
+            # Nur EIN Kennzeichen pro Benutzer
+            if user_id in data[
+                "license_plates"
+            ]:
 
                 await interaction.response.send_message(
-                    "❌ Du hast bereits ein Kennzeichen.",
+                    "❌ Du hast bereits ein Kennzeichen.\n"
+                    "Lösche zuerst dein aktuelles Kennzeichen.",
                     ephemeral=True
                 )
                 return
 
-            plate = self.plate.value.strip().upper()
+            plate = (
+                self.plate.value
+                .strip()
+                .upper()
+            )
 
             if not valid_plate(plate):
 
                 await interaction.response.send_message(
                     "❌ Ungültiges Kennzeichen.\n\n"
-                    "Beispiel: `RLP 01`",
+                    "Beispiele:\n"
+                    "`RLP 01`\n"
+                    "`RY ZE 02`",
                     ephemeral=True
                 )
                 return
@@ -401,15 +528,22 @@ class LicensePlateModal(
                 )
                 return
 
+            # Die NUMMER ist global einzigartig.
+            # RLP 01 blockiert dadurch auch RY ZE 01.
             if plate_number_exists(number):
 
                 await interaction.response.send_message(
-                    f"❌ Die Nummer `{number}` ist bereits vergeben.",
+                    f"❌ Die Nummer `{number}` ist bereits vergeben.\n"
+                    "Die Nummer muss für jedes Kennzeichen "
+                    "einzigartig sein.",
                     ephemeral=True
                 )
                 return
 
-            data["license_plates"][user_id] = plate
+            data[
+                "license_plates"
+            ][user_id] = plate
+
             save_data()
 
         await interaction.response.send_message(
@@ -423,8 +557,9 @@ class LicensePlateModal(
 class LicenseDeleteButton(Button):
 
     def __init__(self):
+
         super().__init__(
-            label="Kennzeichen löschen",
+            label="Mein Kennzeichen löschen",
             style=discord.ButtonStyle.danger,
             emoji="🗑️",
             custom_id="rlp_license_delete"
@@ -432,11 +567,15 @@ class LicenseDeleteButton(Button):
 
     async def callback(self, interaction):
 
-        user_id = str(interaction.user.id)
+        user_id = str(
+            interaction.user.id
+        )
 
         async with license_lock:
 
-            plate = data["license_plates"].pop(
+            plate = data[
+                "license_plates"
+            ].pop(
                 user_id,
                 None
             )
@@ -444,7 +583,7 @@ class LicenseDeleteButton(Button):
             if plate is None:
 
                 await interaction.response.send_message(
-                    "❌ Du hast kein Kennzeichen.",
+                    "❌ Du hast aktuell kein Kennzeichen.",
                     ephemeral=True
                 )
                 return
@@ -453,7 +592,7 @@ class LicenseDeleteButton(Button):
 
         await interaction.response.send_message(
             f"✅ Dein Kennzeichen **{plate}** wurde gelöscht.\n"
-            "Die Nummer ist wieder frei.",
+            "Die Nummer ist jetzt wieder frei.",
             ephemeral=True
         )
 
@@ -463,6 +602,7 @@ class LicenseDeleteButton(Button):
 class LicensePlateView(View):
 
     def __init__(self):
+
         super().__init__(timeout=None)
 
         register_button = Button(
@@ -481,7 +621,9 @@ class LicensePlateView(View):
         register_button.callback = register_callback
 
         self.add_item(register_button)
-        self.add_item(LicenseDeleteButton())
+        self.add_item(
+            LicenseDeleteButton()
+        )
 
 
 async def update_license_plate_panel():
@@ -499,7 +641,9 @@ async def update_license_plate_panel():
 
     try:
 
-        async for message in channel.history(limit=100):
+        async for message in channel.history(
+            limit=100
+        ):
 
             if message.author.id != bot.user.id:
                 continue
@@ -507,33 +651,91 @@ async def update_license_plate_panel():
             if not message.embeds:
                 continue
 
-            if message.embeds[0].footer.text == marker:
-                existing = message
-                break
+            if message.embeds[0].footer.text != marker:
+                continue
 
-    except (discord.Forbidden, discord.HTTPException):
+            if existing is None:
+                existing = message
+            else:
+                await safe_delete(message)
+
+    except (
+        discord.Forbidden,
+        discord.HTTPException
+    ):
         return
 
     embed = discord.Embed(
-        title="🚗 Kennzeichen-System",
+        title="🚗 Kennzeichen",
         description=(
-            "Hier kannst du dein Kennzeichen verwalten.\n\n"
-            "**Regeln:**\n"
-            "• Pro Benutzer ist ein Kennzeichen möglich.\n"
-            "• Die Nummer am Ende muss einzigartig sein.\n"
+            "Hier werden alle aktuell vergebenen "
+            "Kennzeichen angezeigt.\n\n"
+            "📌 **Regeln:**\n"
+            "• Jeder Benutzer darf nur **ein** Kennzeichen besitzen.\n"
+            "• Die letzte Zahl muss global einzigartig sein.\n"
             "• Der Präfix darf mehrfach verwendet werden.\n"
-            "• Gelöschte Nummern werden wieder frei.\n\n"
-            "**Beispiele:**\n"
-            "`RLP 01`\n"
-            "`RLP 02`\n"
-            "`RY ZE 03`\n\n"
-            "Wenn `01` bereits vergeben ist, ist auch "
-            "`RY ZE 01` nicht möglich."
+            "• Beim Löschen wird die Nummer wieder frei.\n\n"
+            "**Beispiel:**\n"
+            "`RLP 01` → vergeben\n"
+            "`RY ZE 01` → ❌ nicht möglich\n"
+            "`RLP 02` → ✅ möglich"
         ),
         color=discord.Color.blue()
     )
 
-    embed.set_footer(text=marker)
+    plates = get_plate_list()
+
+    if plates:
+
+        lines = []
+
+        for user_id, plate in plates:
+
+            member = None
+
+            guild = bot.get_guild(
+                GUILD_ID
+            )
+
+            if guild:
+                member = guild.get_member(
+                    int(user_id)
+                )
+
+            if member:
+                display_name = member.display_name
+            else:
+                display_name = f"User {user_id}"
+
+            lines.append(
+                f"`{plate}` — **{display_name}**"
+            )
+
+        plate_text = "\n".join(lines)
+
+        if len(plate_text) > 3800:
+            plate_text = (
+                plate_text[:3700]
+                + "\n…"
+            )
+
+        embed.add_field(
+            name="📋 Aktuell vergebene Kennzeichen",
+            value=plate_text,
+            inline=False
+        )
+
+    else:
+
+        embed.add_field(
+            name="📋 Aktuell vergebene Kennzeichen",
+            value="Noch keine Kennzeichen vergeben.",
+            inline=False
+        )
+
+    embed.set_footer(
+        text=marker
+    )
 
     if existing:
 
@@ -542,7 +744,10 @@ async def update_license_plate_panel():
                 embed=embed,
                 view=LicensePlateView()
             )
-        except (discord.Forbidden, discord.HTTPException):
+        except (
+            discord.Forbidden,
+            discord.HTTPException
+        ):
             pass
 
     else:
@@ -595,7 +800,9 @@ async def send_new_quiz():
 
     async with quiz_lock:
 
-        if current_quiz["answer"] is not None:
+        if current_quiz[
+            "answer"
+        ] is not None:
             return
 
         emoji, answer = random.choice(
@@ -619,87 +826,13 @@ async def send_new_quiz():
 
         if message:
 
-            current_quiz["answer"] = answer
-            current_quiz["message_id"] = message.id
+            current_quiz[
+                "answer"
+            ] = answer
 
-
-class QuizAnswerModal(
-    Modal,
-    title="Emoji-Quiz"
-):
-
-    answer = TextInput(
-        label="Deine Antwort",
-        placeholder="Antwort eingeben...",
-        max_length=100,
-        required=True
-    )
-
-    async def on_submit(self, interaction):
-
-        async with quiz_lock:
-
-            correct_answer = current_quiz["answer"]
-
-            if correct_answer is None:
-
-                await interaction.response.send_message(
-                    "❌ Aktuell ist kein Quiz aktiv.",
-                    ephemeral=True
-                )
-                return
-
-            answer = self.answer.value.strip().lower()
-
-            if answer != correct_answer:
-
-                await interaction.response.send_message(
-                    "❌ Falsch! Versuch es weiter.",
-                    ephemeral=True
-                )
-                return
-
-            user_id = str(interaction.user.id)
-
-            data["quiz_scores"][user_id] = (
-                data["quiz_scores"].get(user_id, 0) + 1
-            )
-
-            message_id = current_quiz["message_id"]
-
-            current_quiz["answer"] = None
-            current_quiz["message_id"] = None
-
-            save_data()
-
-            await interaction.response.send_message(
-                "✅ Richtig! Du hast einen Punkt bekommen.",
-                ephemeral=True
-            )
-
-            if message_id:
-
-                channel = bot.get_channel(
-                    QUIZ_CHANNEL_ID
-                )
-
-                if channel:
-
-                    try:
-                        message = await channel.fetch_message(
-                            message_id
-                        )
-                        await message.delete()
-
-                    except (
-                        discord.NotFound,
-                        discord.Forbidden,
-                        discord.HTTPException
-                    ):
-                        pass
-
-        await asyncio.sleep(2)
-        await send_new_quiz()
+            current_quiz[
+                "message_id"
+            ] = message.id
 
 
 @bot.event
@@ -710,10 +843,86 @@ async def on_message(message):
 
     if message.channel.id == QUIZ_CHANNEL_ID:
 
-        active_id = current_quiz["message_id"]
+        active_id = current_quiz[
+            "message_id"
+        ]
 
-        if active_id is not None and message.id != active_id:
+        if (
+            active_id is not None
+            and message.id != active_id
+        ):
             await safe_delete(message)
+
+            answer = message.content.strip().lower()
+
+            async with quiz_lock:
+
+                correct = current_quiz[
+                    "answer"
+                ]
+
+                if correct is not None:
+
+                    if answer == correct:
+
+                        user_id = str(
+                            message.author.id
+                        )
+
+                        data[
+                            "quiz_scores"
+                        ][user_id] = (
+                            data[
+                                "quiz_scores"
+                            ].get(user_id, 0) + 1
+                        )
+
+                        old_message_id = current_quiz[
+                            "message_id"
+                        ]
+
+                        current_quiz[
+                            "answer"
+                        ] = None
+
+                        current_quiz[
+                            "message_id"
+                        ] = None
+
+                        save_data()
+
+                        channel = bot.get_channel(
+                            QUIZ_CHANNEL_ID
+                        )
+
+                        if channel and old_message_id:
+
+                            try:
+
+                                quiz_message = (
+                                    await channel.fetch_message(
+                                        old_message_id
+                                    )
+                                )
+
+                                await quiz_message.delete()
+
+                            except (
+                                discord.NotFound,
+                                discord.Forbidden,
+                                discord.HTTPException
+                            ):
+                                pass
+
+                        await safe_send(
+                            channel,
+                            f"✅ {message.author.mention} "
+                            f"hat richtig geraten!"
+                        )
+
+                        await asyncio.sleep(2)
+
+                        await send_new_quiz()
 
     await bot.process_commands(message)
 
@@ -728,18 +937,25 @@ async def quiz_cleanup():
     if channel is None:
         return
 
-    active_id = current_quiz["message_id"]
+    active_id = current_quiz[
+        "message_id"
+    ]
 
     try:
 
-        async for message in channel.history(limit=100):
+        async for message in channel.history(
+            limit=100
+        ):
 
             if message.id == active_id:
                 continue
 
             await safe_delete(message)
 
-    except (discord.Forbidden, discord.HTTPException):
+    except (
+        discord.Forbidden,
+        discord.HTTPException
+    ):
         pass
 
 
@@ -758,7 +974,11 @@ class ShiftView(View):
         emoji="▶️",
         custom_id="rlp_shift_start"
     )
-    async def start_shift(self, interaction, button):
+    async def start_shift(
+        self,
+        interaction,
+        button
+    ):
 
         member = interaction.guild.get_member(
             interaction.user.id
@@ -778,9 +998,13 @@ class ShiftView(View):
             )
             return
 
-        user_id = str(member.id)
+        user_id = str(
+            member.id
+        )
 
-        if user_id in data["developer_shifts"]:
+        if user_id in data[
+            "developer_shifts"
+        ]:
 
             await interaction.response.send_message(
                 "⚠️ Du bist bereits im Dienst.",
@@ -802,13 +1026,15 @@ class ShiftView(View):
 
         try:
 
-            # EINZIGE Rollenvergabe im gesamten Bot
             await member.add_roles(
                 active_role,
                 reason="Entwicklerschicht gestartet"
             )
 
-        except (discord.Forbidden, discord.HTTPException):
+        except (
+            discord.Forbidden,
+            discord.HTTPException
+        ):
 
             await interaction.response.send_message(
                 "❌ Die aktive Schichtrolle konnte nicht vergeben werden.",
@@ -816,7 +1042,9 @@ class ShiftView(View):
             )
             return
 
-        data["developer_shifts"][user_id] = {
+        data[
+            "developer_shifts"
+        ][user_id] = {
             "started": discord.utils.utcnow().isoformat()
         }
 
@@ -838,7 +1066,11 @@ class ShiftView(View):
         emoji="⏹️",
         custom_id="rlp_shift_end"
     )
-    async def end_shift(self, interaction, button):
+    async def end_shift(
+        self,
+        interaction,
+        button
+    ):
 
         member = interaction.guild.get_member(
             interaction.user.id
@@ -847,9 +1079,13 @@ class ShiftView(View):
         if member is None:
             return
 
-        user_id = str(member.id)
+        user_id = str(
+            member.id
+        )
 
-        if user_id not in data["developer_shifts"]:
+        if user_id not in data[
+            "developer_shifts"
+        ]:
 
             await interaction.response.send_message(
                 "⚠️ Du bist aktuell nicht im Dienst.",
@@ -868,10 +1104,15 @@ class ShiftView(View):
                     active_role,
                     reason="Entwicklerschicht beendet"
                 )
-            except (discord.Forbidden, discord.HTTPException):
+            except (
+                discord.Forbidden,
+                discord.HTTPException
+            ):
                 pass
 
-        data["developer_shifts"].pop(
+        data[
+            "developer_shifts"
+        ].pop(
             user_id,
             None
         )
@@ -937,7 +1178,9 @@ async def update_shift_panel():
 
     try:
 
-        async for message in channel.history(limit=100):
+        async for message in channel.history(
+            limit=100
+        ):
 
             if message.author.id != bot.user.id:
                 continue
@@ -945,11 +1188,18 @@ async def update_shift_panel():
             if not message.embeds:
                 continue
 
-            if message.embeds[0].footer.text == marker:
-                existing = message
-                break
+            if message.embeds[0].footer.text != marker:
+                continue
 
-    except (discord.Forbidden, discord.HTTPException):
+            if existing is None:
+                existing = message
+            else:
+                await safe_delete(message)
+
+    except (
+        discord.Forbidden,
+        discord.HTTPException
+    ):
         return
 
     embed = discord.Embed(
@@ -960,8 +1210,8 @@ async def update_shift_panel():
             "Aktiviert die Schichtrolle.\n\n"
             "⏹️ **Schicht beenden**\n"
             "Entfernt die Schichtrolle.\n\n"
-            "Die erforderliche Entwicklerrolle wird vom Bot "
-            "nicht vergeben."
+            "Die Entwickler-Berechtigungsrolle wird "
+            "nicht automatisch vergeben."
         ),
         color=discord.Color.blurple()
     )
@@ -975,7 +1225,10 @@ async def update_shift_panel():
                 embed=embed,
                 view=ShiftView()
             )
-        except (discord.Forbidden, discord.HTTPException):
+        except (
+            discord.Forbidden,
+            discord.HTTPException
+        ):
             pass
 
     else:
@@ -992,7 +1245,11 @@ async def update_shift_panel():
 # =========================================================
 
 @bot.event
-async def on_voice_state_update(member, before, after):
+async def on_voice_state_update(
+    member,
+    before,
+    after
+):
 
     if member.bot:
         return
@@ -1022,9 +1279,13 @@ async def on_voice_state_update(member, before, after):
 
     if joined:
 
-        data["support_case_counter"] += 1
+        data[
+            "support_case_counter"
+        ] += 1
 
-        case_number = data["support_case_counter"]
+        case_number = data[
+            "support_case_counter"
+        ]
 
         save_data()
 
@@ -1151,10 +1412,16 @@ class ApplicationModal(
         )
 
         if message:
-            data["applications"][str(message.id)] = {
-                "user_id": str(interaction.user.id),
+
+            data[
+                "applications"
+            ][str(message.id)] = {
+                "user_id": str(
+                    interaction.user.id
+                ),
                 "status": "offen"
             }
+
             save_data()
 
         await interaction.response.send_message(
@@ -1174,7 +1441,11 @@ class ApplicationView(View):
         emoji="📝",
         custom_id="rlp_application"
     )
-    async def apply(self, interaction, button):
+    async def apply(
+        self,
+        interaction,
+        button
+    ):
 
         await interaction.response.send_modal(
             ApplicationModal()
@@ -1196,7 +1467,9 @@ async def update_application_panel():
 
     try:
 
-        async for message in channel.history(limit=100):
+        async for message in channel.history(
+            limit=100
+        ):
 
             if message.author.id != bot.user.id:
                 continue
@@ -1204,11 +1477,18 @@ async def update_application_panel():
             if not message.embeds:
                 continue
 
-            if message.embeds[0].footer.text == marker:
-                existing = message
-                break
+            if message.embeds[0].footer.text != marker:
+                continue
 
-    except (discord.Forbidden, discord.HTTPException):
+            if existing is None:
+                existing = message
+            else:
+                await safe_delete(message)
+
+    except (
+        discord.Forbidden,
+        discord.HTTPException
+    ):
         return
 
     embed = discord.Embed(
@@ -1229,7 +1509,10 @@ async def update_application_panel():
                 embed=embed,
                 view=ApplicationView()
             )
-        except (discord.Forbidden, discord.HTTPException):
+        except (
+            discord.Forbidden,
+            discord.HTTPException
+        ):
             pass
 
     else:
@@ -1270,13 +1553,21 @@ class DeveloperTaskModal(
             )
             return
 
-        data["developer_task_counter"] += 1
+        data[
+            "developer_task_counter"
+        ] += 1
 
-        task_id = data["developer_task_counter"]
+        task_id = data[
+            "developer_task_counter"
+        ]
 
-        data["developer_tasks"][str(task_id)] = {
+        data[
+            "developer_tasks"
+        ][str(task_id)] = {
             "task": self.task.value,
-            "created_by": str(interaction.user.id),
+            "created_by": str(
+                interaction.user.id
+            ),
             "completed": False
         }
 
@@ -1321,7 +1612,11 @@ class DeveloperTaskView(View):
         emoji="🛠️",
         custom_id="rlp_developer_task"
     )
-    async def create_task(self, interaction, button):
+    async def create_task(
+        self,
+        interaction,
+        button
+    ):
 
         if not has_role(
             interaction.user,
@@ -1354,7 +1649,9 @@ async def update_developer_task_panel():
 
     try:
 
-        async for message in channel.history(limit=100):
+        async for message in channel.history(
+            limit=100
+        ):
 
             if message.author.id != bot.user.id:
                 continue
@@ -1362,11 +1659,18 @@ async def update_developer_task_panel():
             if not message.embeds:
                 continue
 
-            if message.embeds[0].footer.text == marker:
-                existing = message
-                break
+            if message.embeds[0].footer.text != marker:
+                continue
 
-    except (discord.Forbidden, discord.HTTPException):
+            if existing is None:
+                existing = message
+            else:
+                await safe_delete(message)
+
+    except (
+        discord.Forbidden,
+        discord.HTTPException
+    ):
         return
 
     embed = discord.Embed(
@@ -1387,7 +1691,10 @@ async def update_developer_task_panel():
                 embed=embed,
                 view=DeveloperTaskView()
             )
-        except (discord.Forbidden, discord.HTTPException):
+        except (
+            discord.Forbidden,
+            discord.HTTPException
+        ):
             pass
 
     else:
@@ -1413,7 +1720,10 @@ async def on_member_join(member):
 
 
 @bot.event
-async def on_member_update(before, after):
+async def on_member_update(
+    before,
+    after
+):
 
     if after.guild.id != GUILD_ID:
         return
@@ -1433,6 +1743,17 @@ async def on_member_update(before, after):
 
 
 # =========================================================
+# PERSISTENTE VIEWS
+# =========================================================
+
+bot.add_view(NametagView())
+bot.add_view(LicensePlateView())
+bot.add_view(ShiftView())
+bot.add_view(ApplicationView())
+bot.add_view(DeveloperTaskView())
+
+
+# =========================================================
 # READY
 # =========================================================
 
@@ -1444,22 +1765,27 @@ async def on_ready():
     print(f"GUILD: {GUILD_ID}")
     print("========================================")
 
-    guild = bot.get_guild(GUILD_ID)
+    guild = bot.get_guild(
+        GUILD_ID
+    )
 
     if guild:
 
-        # Nur Nametag synchronisieren.
-        # KEINE Rolle wird vergeben.
+        # Nur vorhandene Nametag-Rollen synchronisieren.
+        # Keine Rollen werden automatisch vergeben.
         for member in guild.members:
 
             if member.bot:
                 continue
 
             try:
-                await update_member_nametag(member)
+                await update_member_nametag(
+                    member
+                )
             except Exception as error:
                 print(
-                    f"[NAMETAG] {member.id}: {error}"
+                    f"[NAMETAG] "
+                    f"{member.id}: {error}"
                 )
 
     await update_nametag_panel()
@@ -1476,13 +1802,35 @@ async def on_ready():
 
 
 # =========================================================
+# COMMAND FEHLER
+# =========================================================
+
+@bot.event
+async def on_command_error(
+    ctx,
+    error
+):
+
+    if isinstance(
+        error,
+        commands.CommandNotFound
+    ):
+        return
+
+    print(
+        f"[COMMAND ERROR] {error}"
+    )
+
+
+# =========================================================
 # START
 # =========================================================
 
 if not TOKEN:
     raise RuntimeError(
         "DISCORD_TOKEN fehlt. "
-        "Bitte DISCORD_TOKEN als GitHub Secret setzen."
+        "Bitte das GitHub Secret DISCORD_TOKEN setzen."
     )
+
 
 bot.run(TOKEN)
