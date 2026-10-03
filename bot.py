@@ -1,32 +1,28 @@
-import os
-import json
-import asyncio
-import random
-import time
-import platform
-from datetime import datetime, timezone
-
 import discord
 from discord.ext import commands
-
+from discord.ui import View, Button, Modal, TextInput, ChannelSelect
+import os
+import json
+import random as random_module
+import asyncio
+import time
+from datetime import datetime
 
 # =========================================================
-# CONFIG
+# KONFIGURATION
 # =========================================================
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
 GUILD_ID = 1519481018221072454
 
-QUIZ_CHANNEL_ID = 1533409789256925185
+QUIZ_CHANNEL_ID = 1533409789254679602
 APPLICATION_CHANNEL_ID = 1541391365219295343
 REVIEW_CHANNEL_ID = 1548404201493762181
 NAMETAG_CHANNEL_ID = 1555684071911202836
 LICENSE_PLATE_CHANNEL_ID = 1527350468832006276
-
 SUPPORT_VOICE_CHANNEL_ID = 1519788919254679602
 SUPPORT_LOG_CHANNEL_ID = 1521439814863151155
-
 DEVELOPER_TASK_CHANNEL_ID = 1540442867334385715
 DEVELOPER_SHIFT_CHANNEL_ID = 1555923435056795648
 SHIFT_LOG_CHANNEL_ID = 1540797414863151155
@@ -42,31 +38,28 @@ SHIFT_PERMISSION_ROLE_ID = 1523674698574200904
 DEVELOPER_SHIFT_ROLE_ID = 1527372148979798086
 OWNER_ROLE_ID = 1544691379613999164
 
-NAMETAG = "RLP | "
+# Diese Rolle darf Vorschläge annehmen/ablehnen
+SUGGESTION_REVIEW_ROLE_ID = 1530188150456979526
 
+NAMETAG = "RLP | "
 DATA_FILE = "bot_data.json"
 
+# Panel-Marker
 NAMETAG_PANEL_MARKER = "RLP_NAMETAG_PANEL"
 LICENSE_PANEL_MARKER = "RLP_LICENSE_PANEL"
-SHIFT_PANEL_MARKER = "RLP_SHIFT_PANEL"
 APPLICATION_PANEL_MARKER = "RLP_APPLICATION_PANEL"
 DEV_TASK_PANEL_MARKER = "RLP_DEV_TASK_PANEL"
+SHIFT_PANEL_MARKER = "RLP_SHIFT_PANEL"
 OWNER_PANEL_MARKER = "RLP_OWNER_PANEL"
 COMMUNITY_PANEL_MARKER = "RLP_COMMUNITY_PANEL"
 
-BOT_START_TIME = time.time()
-
+START_TIME = time.time()
 
 # =========================================================
-# INTENTS
+# BOT
 # =========================================================
 
-intents = discord.Intents.default()
-intents.message_content = True
-intents.members = True
-intents.guilds = True
-intents.voice_states = True
-
+intents = discord.Intents.all()
 
 bot = commands.Bot(
     command_prefix="!",
@@ -74,47 +67,86 @@ bot = commands.Bot(
     help_command=None
 )
 
+quiz_lock = asyncio.Lock()
+quiz_message_id = None
+quiz_answer = None
+quiz_starting = False
+
+used_quiz_questions = set()
 
 # =========================================================
-# DATA
+# QUIZ
 # =========================================================
+
+QUIZ_QUESTIONS = [
+    ("🇺🇸🗽", "usa"),
+    ("🇩🇪🍺", "deutschland"),
+    ("🇫🇷🗼", "frankreich"),
+    ("🇮🇹🍕", "italien"),
+    ("🇯🇵🗾", "japan"),
+    ("🇬🇧👑", "uk"),
+    ("🌞🌍", "sonne"),
+    ("🌧️☔", "regen"),
+    ("🔥💧", "wasser"),
+    ("🐶", "hund"),
+    ("🐱", "katze"),
+    ("🦁", "löwe"),
+    ("🐘", "elefant"),
+    ("🍎", "apfel"),
+    ("🍌", "banane"),
+    ("🍕", "pizza"),
+    ("🍔", "burger"),
+    ("🚗", "auto"),
+    ("✈️", "flugzeug"),
+    ("🚲", "fahrrad"),
+]
+
+# =========================================================
+# DATEN
+# =========================================================
+
+def default_data():
+    return {
+        "license_plates": {},
+        "developer_tasks": [],
+        "suggestions": {}
+    }
+
 
 def load_data():
     if not os.path.exists(DATA_FILE):
-        return {
-            "license_plates": {},
-            "developer_tasks": {},
-            "used_license_numbers": []
-        }
+        return default_data()
 
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        data.setdefault("license_plates", {})
-        data.setdefault("developer_tasks", {})
-        data.setdefault("used_license_numbers", [])
+        defaults = default_data()
+
+        for key, value in defaults.items():
+            if key not in data:
+                data[key] = value
 
         return data
 
-    except Exception:
-        return {
-            "license_plates": {},
-            "developer_tasks": {},
-            "used_license_numbers": []
-        }
+    except Exception as e:
+        print(f"DATA LOAD ERROR: {e}")
+        return default_data()
 
 
 data = load_data()
 
 
 def save_data():
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4, ensure_ascii=False)
+    try:
+        with open(DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4, ensure_ascii=False)
+    except Exception as e:
+        print(f"DATA SAVE ERROR: {e}")
 
 
 # =========================================================
-# HELPER
+# HILFSFUNKTIONEN
 # =========================================================
 
 def get_guild():
@@ -122,57 +154,37 @@ def get_guild():
 
 
 def get_channel(channel_id):
-    channel = bot.get_channel(channel_id)
-
-    if channel is not None:
-        return channel
-
-    guild = get_guild()
-
-    if guild is None:
-        return None
-
-    return guild.get_channel(channel_id)
+    return bot.get_channel(channel_id)
 
 
 def has_role(member, role_id):
-    return isinstance(member, discord.Member) and any(
-        role.id == role_id for role in member.roles
-    )
+    return any(role.id == role_id for role in member.roles)
 
 
 def is_owner(member):
     return has_role(member, OWNER_ROLE_ID)
 
 
-async def safe_delete(message):
-    try:
-        await message.delete()
-    except Exception:
-        pass
+def is_suggestion_reviewer(member):
+    return has_role(member, SUGGESTION_REVIEW_ROLE_ID)
 
 
-def clean_nametag(nickname):
-    if nickname is None:
-        return None
-
-    result = nickname
-
-    prefixes = [
-        NAMETAG,
-        NAMETAG.replace(" ", "\u00a0")
-    ]
-
-    for prefix in prefixes:
-        if result.startswith(prefix):
-            result = result[len(prefix):]
-            break
-
-    return result
+def is_shift_allowed(member):
+    return has_role(member, SHIFT_PERMISSION_ROLE_ID)
 
 
-def format_uptime(seconds):
-    seconds = int(seconds)
+def safe_delete(message):
+    async def delete():
+        try:
+            await message.delete()
+        except Exception:
+            pass
+
+    return delete()
+
+
+def uptime_text():
+    seconds = int(time.time() - START_TIME)
 
     days, seconds = divmod(seconds, 86400)
     hours, seconds = divmod(seconds, 3600)
@@ -181,190 +193,234 @@ def format_uptime(seconds):
     parts = []
 
     if days:
-        parts.append(f"{days}d")
-
+        parts.append(f"{days}T")
     if hours:
-        parts.append(f"{hours}h")
-
+        parts.append(f"{hours}Std.")
     if minutes:
-        parts.append(f"{minutes}m")
+        parts.append(f"{minutes}Min.")
 
-    parts.append(f"{seconds}s")
+    parts.append(f"{seconds}Sek.")
 
     return " ".join(parts)
 
 
-# =========================================================
-# QUIZ
-# =========================================================
+async def find_panel_message(marker):
+    guild = get_guild()
 
-QUIZ_QUESTIONS = [
-    ("🇺🇸🗽", "usa"),
-    ("🇩🇪🥨", "deutschland"),
-    ("🍎📱", "apple"),
-    ("🌙⭐", "nacht"),
-    ("☀️🌡️", "sommer"),
-    ("🐶", "hund"),
-    ("🐱", "katze"),
-    ("🍕", "pizza"),
-    ("⚽🏆", "fußball"),
-    ("🚗", "auto"),
-    ("🎮", "gaming"),
-    ("🍔", "burger"),
-    ("🌊🏖️", "strand"),
-    ("❄️⛄", "winter"),
-    ("🎃", "halloween"),
-    ("🎄🎁", "weihnachten"),
-    ("❤️", "herz"),
-    ("🚀🌌", "weltraum"),
-    ("🐼", "panda"),
-    ("🦁", "löwe")
-]
+    if guild is None:
+        return None
 
-used_quiz_questions = set()
-
-quiz_message_id = None
-quiz_answer = None
-quiz_lock = asyncio.Lock()
-quiz_starting = False
-
-
-async def send_quiz_question():
-    global quiz_message_id
-    global quiz_answer
-    global quiz_starting
-
-    async with quiz_lock:
-        if quiz_starting:
-            return
-
-        if quiz_answer is not None:
-            return
-
-        quiz_starting = True
-
+    for channel in guild.text_channels:
         try:
-            channel = get_channel(QUIZ_CHANNEL_ID)
+            async for message in channel.history(limit=100):
+                if message.author.id != bot.user.id:
+                    continue
 
-            if channel is None:
-                return
+                for embed in message.embeds:
+                    for field in embed.fields:
+                        if field.value == marker:
+                            return message
 
-            available = [
-                q for q in QUIZ_QUESTIONS
-                if q[0] not in used_quiz_questions
-            ]
+        except Exception:
+            continue
 
-            if not available:
-                used_quiz_questions.clear()
-                available = QUIZ_QUESTIONS.copy()
+    return None
 
-            question, answer = random.choice(available)
 
-            used_quiz_questions.add(question)
+async def delete_old_panels(channel, marker):
+    try:
+        async for message in channel.history(limit=100):
+            if message.author.id != bot.user.id:
+                continue
 
-            message = await channel.send(
-                f"🧠 **Quiz**\n\n"
-                f"Was ist das?\n\n"
-                f"# {question}\n\n"
-                f"> Schreibe deine Antwort in den Chat!"
-            )
+            found = False
 
-            quiz_message_id = message.id
-            quiz_answer = answer.lower().strip()
+            for embed in message.embeds:
+                for field in embed.fields:
+                    if field.value == marker:
+                        found = True
+                        break
 
-        finally:
-            quiz_starting = False
+            if found:
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+
+    except Exception as e:
+        print(f"Panel Delete Error: {e}")
 
 
 # =========================================================
 # NAMETAG
 # =========================================================
 
-class NametagResetButton(discord.ui.Button):
+class NametagView(View):
     def __init__(self):
-        super().__init__(
-            label="Nametag entfernen",
-            emoji="🔄",
-            style=discord.ButtonStyle.danger,
-            custom_id="rlp_nametag_reset"
+        super().__init__(timeout=None)
+
+        self.add_item(
+            NametagButton(
+                label="Nametag setzen",
+                emoji="🏷️",
+                action="set",
+                custom_id="rlp_nametag_set"
+            )
         )
 
-    async def callback(self, interaction: discord.Interaction):
+        self.add_item(
+            NametagButton(
+                label="Nametag entfernen",
+                emoji="🗑️",
+                action="remove",
+                custom_id="rlp_nametag_remove"
+            )
+        )
+
+
+class NametagButton(Button):
+    def __init__(self, label, emoji, action, custom_id):
+        super().__init__(
+            label=label,
+            emoji=emoji,
+            style=discord.ButtonStyle.primary if action == "set" else discord.ButtonStyle.danger,
+            custom_id=custom_id
+        )
+
+        self.action = action
+
+    async def callback(self, interaction):
+
+        if not isinstance(interaction.user, discord.Member):
+            await interaction.response.send_message(
+                "❌ Nur Server-Mitglieder können das benutzen.",
+                ephemeral=True
+            )
+            return
 
         member = interaction.user
 
-        if not isinstance(member, discord.Member):
-            await interaction.response.send_message(
-                "❌ Dieser Button funktioniert nur auf dem Server.",
-                ephemeral=True
-            )
-            return
+        if self.action == "set":
 
-        if member.nick is None:
-            await interaction.response.send_message(
-                "❌ Du hast aktuell keinen Nametag.",
-                ephemeral=True
-            )
-            return
+            current_name = member.nick or member.name
 
-        old_nick = member.nick
-        new_nick = clean_nametag(old_nick)
+            if current_name.startswith(NAMETAG):
+                await interaction.response.send_message(
+                    "🏷️ Du hast bereits einen Nametag.",
+                    ephemeral=True
+                )
+                return
 
-        if new_nick == old_nick:
-            await interaction.response.send_message(
-                "❌ Dein Nickname enthält keinen RLP-Nametag.",
-                ephemeral=True
-            )
-            return
+            new_name = NAMETAG + current_name
 
-        try:
-            await member.edit(
-                nick=new_nick,
-                reason="RLP Nametag zurückgesetzt"
-            )
+            try:
+                await member.edit(nick=new_name)
 
-            await interaction.response.send_message(
-                f"✅ Dein Nametag wurde entfernt.\n"
-                f"Neuer Name: **{new_nick}**",
-                ephemeral=True
-            )
+                await interaction.response.send_message(
+                    f"✅ Dein Nametag wurde gesetzt: `{new_name}`",
+                    ephemeral=True
+                )
 
-        except discord.Forbidden:
-            await interaction.response.send_message(
-                "❌ Ich kann deinen Nickname nicht ändern. "
-                "Überprüfe die Bot-Rolle und deren Position.",
-                ephemeral=True
-            )
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    "❌ Ich kann deinen Nicknamen nicht ändern. Prüfe meine Rechte und Rollen-Hierarchie.",
+                    ephemeral=True
+                )
 
-        except Exception as e:
-            print(f"Nametag Error: {e}")
+            except Exception as e:
+                await interaction.response.send_message(
+                    f"❌ Fehler: `{e}`",
+                    ephemeral=True
+                )
 
-            await interaction.response.send_message(
-                "❌ Beim Entfernen des Nametags ist ein Fehler aufgetreten.",
-                ephemeral=True
-            )
+        else:
 
+            current_name = member.nick
 
-class NametagView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(NametagResetButton())
+            if not current_name:
+                await interaction.response.send_message(
+                    "ℹ️ Du hast keinen Nicknamen.",
+                    ephemeral=True
+                )
+                return
+
+            new_name = current_name
+
+            if new_name.startswith(NAMETAG):
+                new_name = new_name[len(NAMETAG):]
+
+            elif new_name.startswith("RLP |\u00a0"):
+                new_name = new_name[len("RLP |\u00a0"):]
+
+            else:
+                await interaction.response.send_message(
+                    "ℹ️ Dein Nametag ist bereits nicht vorhanden.",
+                    ephemeral=True
+                )
+                return
+
+            if not new_name.strip():
+                new_name = None
+
+            try:
+                await member.edit(nick=new_name)
+
+                await interaction.response.send_message(
+                    "✅ Nametag wurde entfernt.",
+                    ephemeral=True
+                )
+
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    "❌ Ich kann deinen Nicknamen nicht ändern.",
+                    ephemeral=True
+                )
+
+            except Exception as e:
+                await interaction.response.send_message(
+                    f"❌ Fehler: `{e}`",
+                    ephemeral=True
+                )
 
 
 async def update_nametag_panel():
 
     channel = get_channel(NAMETAG_CHANNEL_ID)
 
-    if channel is None:
+    if not isinstance(channel, discord.TextChannel):
+        return
+
+    # WICHTIG:
+    # Hier werden alte Panels NICHT gelöscht.
+    # Dadurch bleiben die Nametags der Mitglieder komplett unangetastet.
+
+    existing = None
+
+    try:
+        async for message in channel.history(limit=100):
+            if message.author.id != bot.user.id:
+                continue
+
+            for embed in message.embeds:
+                for field in embed.fields:
+                    if field.value == NAMETAG_PANEL_MARKER:
+                        existing = message
+                        break
+
+    except Exception:
+        pass
+
+    if existing:
         return
 
     embed = discord.Embed(
-        title="🏷️ Nametag-System",
+        title="🏷️ Nametag System",
         description=(
-            "Hier kannst du deinen **RLP-Nametag** verwalten.\n\n"
-            f"**Nametag:** `{NAMETAG}`\n\n"
-            "Wenn du deinen Nametag entfernen möchtest, "
-            "klicke auf den Button unten."
+            "Hier kannst du deinen **RLP |** Nametag verwalten.\n\n"
+            "🏷️ **Nametag setzen**\n"
+            "Setzt `RLP | ` vor deinen Namen.\n\n"
+            "🗑️ **Nametag entfernen**\n"
+            "Entfernt nur den `RLP | ` Nametag."
         ),
         color=discord.Color.blue()
     )
@@ -375,46 +431,20 @@ async def update_nametag_panel():
         inline=False
     )
 
-    found = False
-
-    async for message in channel.history(limit=50):
-
-        if message.author != bot.user:
-            continue
-
-        if not message.embeds:
-            continue
-
-        if NAMETAG_PANEL_MARKER in message.embeds[0].description if message.embeds[0].description else False:
-            found = True
-            break
-
-        for field in message.embeds[0].fields:
-            if field.value == NAMETAG_PANEL_MARKER:
-                found = True
-                break
-
-        if found:
-            break
-
-    if not found:
-        await channel.send(
-            embed=embed,
-            view=NametagView()
-        )
+    await channel.send(embed=embed, view=NametagView())
 
 
 # =========================================================
 # KENNZEICHEN
 # =========================================================
 
-class LicensePlateModal(discord.ui.Modal):
+class LicensePlateModal(Modal):
     def __init__(self):
-        super().__init__(title="Kennzeichen erstellen")
+        super().__init__(title="Kennzeichen registrieren")
 
-        self.plate = discord.ui.TextInput(
+        self.plate = TextInput(
             label="Kennzeichen",
-            placeholder="z.B. RLP 01 oder RY ZE 25",
+            placeholder="z.B. RLP 123",
             required=True,
             max_length=20
         )
@@ -423,133 +453,119 @@ class LicensePlateModal(discord.ui.Modal):
 
     async def on_submit(self, interaction):
 
-        user_id = str(interaction.user.id)
+        value = self.plate.value.strip().upper()
 
-        plate = self.plate.value.strip().upper()
-
-        parts = plate.split()
+        parts = value.split()
 
         if len(parts) < 2:
             await interaction.response.send_message(
-                "❌ Das Kennzeichen muss aus Prefix + Nummer bestehen.",
+                "❌ Das Kennzeichen muss einen Präfix und eine Nummer enthalten.",
                 ephemeral=True
             )
             return
 
-        numeric_part = parts[-1]
+        numeric_token = parts[-1]
 
-        if not numeric_part.isdigit():
+        if not numeric_token.isdigit():
             await interaction.response.send_message(
                 "❌ Die letzte Kennzeichen-Komponente muss eine Zahl sein.",
                 ephemeral=True
             )
             return
 
-        number = int(numeric_part)
+        plates = data["license_plates"]
 
-        if number in data["used_license_numbers"]:
-            await interaction.response.send_message(
-                "❌ Diese Nummer wird bereits verwendet.",
-                ephemeral=True
-            )
-            return
+        for user_id, plate in plates.items():
 
-        if user_id in data["license_plates"]:
-            await interaction.response.send_message(
-                "❌ Du besitzt bereits ein Kennzeichen.",
-                ephemeral=True
-            )
-            return
+            old_parts = plate["plate"].split()
 
-        data["license_plates"][user_id] = {
-            "plate": plate,
-            "number": number,
-            "name": interaction.user.display_name
+            if old_parts and old_parts[-1] == numeric_token:
+                await interaction.response.send_message(
+                    f"❌ Die Nummer `{numeric_token}` ist bereits vergeben.",
+                    ephemeral=True
+                )
+                return
+
+        plates[str(interaction.user.id)] = {
+            "plate": value,
+            "user_id": interaction.user.id
         }
-
-        data["used_license_numbers"].append(number)
 
         save_data()
 
         await interaction.response.send_message(
-            f"✅ Dein Kennzeichen **{plate}** wurde erstellt.",
+            f"✅ Dein Kennzeichen `{value}` wurde registriert.",
             ephemeral=True
         )
 
         await update_license_panel()
 
 
-class LicensePlateButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(
-            label="Kennzeichen erstellen",
-            emoji="🚗",
-            style=discord.ButtonStyle.success,
-            custom_id="rlp_license_create"
-        )
-
-    async def callback(self, interaction):
-        await interaction.response.send_modal(
-            LicensePlateModal()
-        )
-
-
-class LicensePlateView(discord.ui.View):
+class LicensePlateView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(LicensePlateButton())
+
+        self.add_item(
+            Button(
+                label="Kennzeichen registrieren",
+                emoji="🚗",
+                style=discord.ButtonStyle.success,
+                custom_id="rlp_license_register"
+            )
+        )
+
+        self.children[0].callback = self.register_callback
+
+    async def register_callback(self, interaction):
+        await interaction.response.send_modal(LicensePlateModal())
 
 
 async def update_license_panel():
 
     channel = get_channel(LICENSE_PLATE_CHANNEL_ID)
 
-    if channel is None:
+    if not isinstance(channel, discord.TextChannel):
         return
+
+    await delete_old_panels(channel, LICENSE_PANEL_MARKER)
 
     embed = discord.Embed(
         title="🚗 Kennzeichen-System",
         description=(
-            "Erstelle hier dein persönliches Kennzeichen.\n\n"
-            "⚠️ Die **Nummer am Ende** muss serverweit einzigartig sein.\n"
-            "Der Prefix darf von mehreren Personen verwendet werden."
+            "Hier kannst du dein Kennzeichen registrieren.\n\n"
+            "⚠️ Die Nummer am Ende des Kennzeichens muss **global einzigartig** sein."
         ),
-        color=discord.Color.orange()
+        color=discord.Color.blue()
     )
 
     if data["license_plates"]:
 
         lines = []
 
-        for user_id, info in data["license_plates"].items():
+        for plate_data in data["license_plates"].values():
 
-            member = channel.guild.get_member(int(user_id))
+            user = channel.guild.get_member(plate_data["user_id"])
 
-            if member:
-                name = member.display_name
+            if user:
+                name = user.display_name
             else:
-                name = info.get("name", "Unbekannt")
+                name = f"User {plate_data['user_id']}"
 
             lines.append(
-                f"» **{info['plate']}** — {name}"
+                f"🚗 `{plate_data['plate']}` — **{name}**"
             )
 
-        text = "\n".join(lines)
-
-        if len(text) > 3900:
-            text = text[:3900] + "\n..."
-
         embed.add_field(
-            name="Aktuelle Kennzeichen",
-            value=text,
+            name="Registrierte Kennzeichen",
+            value="\n".join(lines),
             inline=False
         )
 
     else:
 
         embed.add_field(
-            name="Aktuelle Kennzeichen",
-            value="Noch keine Kennzeichen vergeben.",
+            name="Registrierte Kennzeichen",
+            value="Noch keine Kennzeichen registriert.",
             inline=False
         )
 
@@ -559,32 +575,6 @@ async def update_license_panel():
         inline=False
     )
 
-    found = False
-
-    async for message in channel.history(limit=50):
-
-        if message.author != bot.user:
-            continue
-
-        if not message.embeds:
-            continue
-
-        for field in message.embeds[0].fields:
-            if field.value == LICENSE_PANEL_MARKER:
-                found = True
-                break
-
-        if found:
-            try:
-                await message.edit(
-                    embed=embed,
-                    view=LicensePlateView()
-                )
-            except Exception:
-                pass
-
-            return
-
     await channel.send(
         embed=embed,
         view=LicensePlateView()
@@ -592,30 +582,30 @@ async def update_license_panel():
 
 
 # =========================================================
-# BEWERBUNGEN
+# BEWERBUNG
 # =========================================================
 
-class ApplicationModal(discord.ui.Modal):
+class ApplicationModal(Modal):
     def __init__(self):
         super().__init__(title="Bewerbung")
 
-        self.name_input = discord.ui.TextInput(
+        self.name_input = TextInput(
             label="Name",
-            placeholder="Wie heißt du?",
+            placeholder="Dein Name",
             required=True,
             max_length=100
         )
 
-        self.age_input = discord.ui.TextInput(
+        self.age_input = TextInput(
             label="Alter",
-            placeholder="Wie alt bist du?",
+            placeholder="Dein Alter",
             required=True,
             max_length=3
         )
 
-        self.reason_input = discord.ui.TextInput(
+        self.reason_input = TextInput(
             label="Warum möchtest du ins Team?",
-            placeholder="Erzähle uns etwas über dich...",
+            placeholder="Schreibe etwas über dich...",
             style=discord.TextStyle.paragraph,
             required=True,
             max_length=2000
@@ -629,7 +619,7 @@ class ApplicationModal(discord.ui.Modal):
 
         channel = get_channel(APPLICATION_CHANNEL_ID)
 
-        if channel is None:
+        if not isinstance(channel, discord.TextChannel):
             await interaction.response.send_message(
                 "❌ Bewerbungskanal nicht gefunden.",
                 ephemeral=True
@@ -637,13 +627,19 @@ class ApplicationModal(discord.ui.Modal):
             return
 
         embed = discord.Embed(
-            title="📝 Neue Bewerbung",
-            color=discord.Color.blurple(),
+            title="📋 Neue Bewerbung",
+            color=discord.Color.blue(),
             timestamp=discord.utils.utcnow()
         )
 
         embed.add_field(
-            name="👤 Name",
+            name="👤 Bewerber",
+            value=f"{interaction.user.mention}\n`{interaction.user.id}`",
+            inline=False
+        )
+
+        embed.add_field(
+            name="📝 Name",
             value=self.name_input.value,
             inline=True
         )
@@ -655,63 +651,54 @@ class ApplicationModal(discord.ui.Modal):
         )
 
         embed.add_field(
-            name="💬 Warum Team?",
+            name="💬 Grund",
             value=self.reason_input.value,
             inline=False
         )
 
-        embed.add_field(
-            name="Discord",
-            value=f"{interaction.user.mention}\n`{interaction.user.id}`",
-            inline=False
-        )
-
-        await channel.send(
-            content="📥 **Neue Bewerbung eingegangen!**",
-            embed=embed
-        )
+        await channel.send(embed=embed)
 
         await interaction.response.send_message(
-            "✅ Deine Bewerbung wurde erfolgreich abgeschickt!",
+            "✅ Deine Bewerbung wurde abgeschickt.",
             ephemeral=True
         )
 
 
-class ApplicationButton(discord.ui.Button):
+class ApplicationView(View):
     def __init__(self):
-        super().__init__(
+        super().__init__(timeout=None)
+
+        button = Button(
             label="Bewerben",
-            emoji="📝",
-            style=discord.ButtonStyle.primary,
+            emoji="📋",
+            style=discord.ButtonStyle.success,
             custom_id="rlp_application_button"
         )
 
-    async def callback(self, interaction):
-        await interaction.response.send_modal(
-            ApplicationModal()
-        )
+        button.callback = self.application_callback
 
+        self.add_item(button)
 
-class ApplicationView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(ApplicationButton())
+    async def application_callback(self, interaction):
+        await interaction.response.send_modal(ApplicationModal())
 
 
 async def update_application_panel():
 
     channel = get_channel(APPLICATION_CHANNEL_ID)
 
-    if channel is None:
+    if not isinstance(channel, discord.TextChannel):
         return
 
+    await delete_old_panels(channel, APPLICATION_PANEL_MARKER)
+
     embed = discord.Embed(
-        title="📝 Bewerbungen",
+        title="📋 Team-Bewerbung",
         description=(
-            "Du möchtest Teil unseres Teams werden?\n\n"
-            "Dann klicke auf **Bewerben** und fülle das Formular aus."
+            "Du möchtest Teil des Teams werden?\n\n"
+            "Klicke auf **Bewerben** und fülle das Formular aus."
         ),
-        color=discord.Color.blurple()
+        color=discord.Color.blue()
     )
 
     embed.add_field(
@@ -720,32 +707,6 @@ async def update_application_panel():
         inline=False
     )
 
-    found = False
-
-    async for message in channel.history(limit=50):
-
-        if message.author != bot.user:
-            continue
-
-        if not message.embeds:
-            continue
-
-        for field in message.embeds[0].fields:
-            if field.value == APPLICATION_PANEL_MARKER:
-                found = True
-                break
-
-        if found:
-            try:
-                await message.edit(
-                    embed=embed,
-                    view=ApplicationView()
-                )
-            except Exception:
-                pass
-
-            return
-
     await channel.send(
         embed=embed,
         view=ApplicationView()
@@ -753,14 +714,14 @@ async def update_application_panel():
 
 
 # =========================================================
-# DEVELOPER TASKS
+# DEVELOPER AUFGABEN
 # =========================================================
 
-class DeveloperTaskModal(discord.ui.Modal):
+class DeveloperTaskModal(Modal):
     def __init__(self):
         super().__init__(title="Developer Aufgabe")
 
-        self.task_input = discord.ui.TextInput(
+        self.task = TextInput(
             label="Aufgabe",
             placeholder="Was soll erledigt werden?",
             style=discord.TextStyle.paragraph,
@@ -768,100 +729,85 @@ class DeveloperTaskModal(discord.ui.Modal):
             max_length=2000
         )
 
-        self.add_item(self.task_input)
+        self.add_item(self.task)
 
     async def on_submit(self, interaction):
 
-        if not has_role(interaction.user, SHIFT_PERMISSION_ROLE_ID):
-            await interaction.response.send_message(
-                "❌ Du hast keine Berechtigung dafür.",
-                ephemeral=True
-            )
-            return
-
-        task_id = str(int(time.time() * 1000))
-
-        data["developer_tasks"][task_id] = {
-            "task": self.task_input.value,
-            "creator": interaction.user.id,
-            "created": datetime.now(timezone.utc).isoformat()
-        }
-
-        save_data()
-
-        channel = get_channel(DEVELOPER_TASK_CHANNEL_ID)
-
-        if channel:
-
-            embed = discord.Embed(
-                title="👨‍💻 Neue Developer-Aufgabe",
-                description=self.task_input.value,
-                color=discord.Color.blurple(),
-                timestamp=discord.utils.utcnow()
-            )
-
-            embed.add_field(
-                name="Erstellt von",
-                value=interaction.user.mention,
-                inline=True
-            )
-
-            embed.add_field(
-                name="Task ID",
-                value=task_id,
-                inline=True
-            )
-
-            await channel.send(embed=embed)
-
-        await interaction.response.send_message(
-            "✅ Developer-Aufgabe wurde erstellt.",
-            ephemeral=True
-        )
-
-
-class DeveloperTaskButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(
-            label="Aufgabe erstellen",
-            emoji="➕",
-            style=discord.ButtonStyle.primary,
-            custom_id="rlp_dev_task_create"
-        )
-
-    async def callback(self, interaction):
-        if not has_role(interaction.user, SHIFT_PERMISSION_ROLE_ID):
+        if not is_shift_allowed(interaction.user):
             await interaction.response.send_message(
                 "❌ Du hast keine Berechtigung.",
                 ephemeral=True
             )
             return
 
-        await interaction.response.send_modal(
-            DeveloperTaskModal()
+        task = {
+            "id": len(data["developer_tasks"]) + 1,
+            "task": self.task.value,
+            "author_id": interaction.user.id,
+            "created_at": datetime.utcnow().isoformat(),
+            "done": False
+        }
+
+        data["developer_tasks"].append(task)
+        save_data()
+
+        channel = get_channel(DEVELOPER_TASK_CHANNEL_ID)
+
+        if isinstance(channel, discord.TextChannel):
+
+            embed = discord.Embed(
+                title=f"🖥️ Developer Aufgabe #{task['id']}",
+                description=task["task"],
+                color=discord.Color.orange()
+            )
+
+            embed.add_field(
+                name="Erstellt von",
+                value=interaction.user.mention,
+                inline=False
+            )
+
+            await channel.send(embed=embed)
+
+        await interaction.response.send_message(
+            "✅ Developer-Aufgabe erstellt.",
+            ephemeral=True
         )
 
 
-class DeveloperTaskView(discord.ui.View):
+class DeveloperTaskView(View):
     def __init__(self):
         super().__init__(timeout=None)
-        self.add_item(DeveloperTaskButton())
+
+        button = Button(
+            label="Aufgabe erstellen",
+            emoji="🖥️",
+            style=discord.ButtonStyle.primary,
+            custom_id="rlp_dev_task_create"
+        )
+
+        button.callback = self.task_callback
+        self.add_item(button)
+
+    async def task_callback(self, interaction):
+        await interaction.response.send_modal(DeveloperTaskModal())
 
 
 async def update_developer_task_panel():
 
     channel = get_channel(DEVELOPER_TASK_CHANNEL_ID)
 
-    if channel is None:
+    if not isinstance(channel, discord.TextChannel):
         return
 
+    await delete_old_panels(channel, DEV_TASK_PANEL_MARKER)
+
     embed = discord.Embed(
-        title="👨‍💻 Developer Aufgaben",
+        title="🖥️ Developer Aufgaben",
         description=(
-            "Hier können berechtigte Mitglieder neue "
-            "Developer-Aufgaben erstellen."
+            "Hier können berechtigte Teammitglieder neue Developer-Aufgaben erstellen."
         ),
-        color=discord.Color.blurple()
+        color=discord.Color.orange()
     )
 
     embed.add_field(
@@ -870,32 +816,6 @@ async def update_developer_task_panel():
         inline=False
     )
 
-    found = False
-
-    async for message in channel.history(limit=50):
-
-        if message.author != bot.user:
-            continue
-
-        if not message.embeds:
-            continue
-
-        for field in message.embeds[0].fields:
-            if field.value == DEV_TASK_PANEL_MARKER:
-                found = True
-                break
-
-        if found:
-            try:
-                await message.edit(
-                    embed=embed,
-                    view=DeveloperTaskView()
-                )
-            except Exception:
-                pass
-
-            return
-
     await channel.send(
         embed=embed,
         view=DeveloperTaskView()
@@ -903,23 +823,38 @@ async def update_developer_task_panel():
 
 
 # =========================================================
-# DEVELOPER SHIFT
+# DEVELOPER SCHICHT
 # =========================================================
 
-class DeveloperShiftStartButton(discord.ui.Button):
+class DeveloperShiftView(View):
     def __init__(self):
-        super().__init__(
+        super().__init__(timeout=None)
+
+        start_button = Button(
             label="Schicht starten",
             emoji="🟢",
             style=discord.ButtonStyle.success,
             custom_id="rlp_dev_shift_start"
         )
 
-    async def callback(self, interaction):
+        end_button = Button(
+            label="Schicht beenden",
+            emoji="🔴",
+            style=discord.ButtonStyle.danger,
+            custom_id="rlp_dev_shift_end"
+        )
 
-        if not has_role(interaction.user, SHIFT_PERMISSION_ROLE_ID):
+        start_button.callback = self.start_callback
+        end_button.callback = self.end_callback
+
+        self.add_item(start_button)
+        self.add_item(end_button)
+
+    async def start_callback(self, interaction):
+
+        if not is_shift_allowed(interaction.user):
             await interaction.response.send_message(
-                "❌ Du hast keine Berechtigung für Developer-Schichten.",
+                "❌ Du hast keine Berechtigung.",
                 ephemeral=True
             )
             return
@@ -935,7 +870,7 @@ class DeveloperShiftStartButton(discord.ui.Button):
 
         if role in interaction.user.roles:
             await interaction.response.send_message(
-                "⚠️ Du bist bereits in einer Developer-Schicht.",
+                "ℹ️ Du bist bereits in einer Developer-Schicht.",
                 ephemeral=True
             )
             return
@@ -943,12 +878,12 @@ class DeveloperShiftStartButton(discord.ui.Button):
         try:
             await interaction.user.add_roles(
                 role,
-                reason="Developer-Schicht gestartet"
+                reason=f"Developer-Schicht gestartet von {interaction.user}"
             )
 
             log_channel = get_channel(SHIFT_LOG_CHANNEL_ID)
 
-            if log_channel:
+            if isinstance(log_channel, discord.TextChannel):
                 await log_channel.send(
                     f"🟢 **Developer-Schicht gestartet**\n"
                     f"👤 {interaction.user.mention}"
@@ -965,19 +900,9 @@ class DeveloperShiftStartButton(discord.ui.Button):
                 ephemeral=True
             )
 
+    async def end_callback(self, interaction):
 
-class DeveloperShiftEndButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(
-            label="Schicht beenden",
-            emoji="🔴",
-            style=discord.ButtonStyle.danger,
-            custom_id="rlp_dev_shift_end"
-        )
-
-    async def callback(self, interaction):
-
-        if not has_role(interaction.user, SHIFT_PERMISSION_ROLE_ID):
+        if not is_shift_allowed(interaction.user):
             await interaction.response.send_message(
                 "❌ Du hast keine Berechtigung.",
                 ephemeral=True
@@ -995,7 +920,7 @@ class DeveloperShiftEndButton(discord.ui.Button):
 
         if role not in interaction.user.roles:
             await interaction.response.send_message(
-                "⚠️ Du bist aktuell nicht in einer Developer-Schicht.",
+                "ℹ️ Du bist aktuell nicht in einer Developer-Schicht.",
                 ephemeral=True
             )
             return
@@ -1003,12 +928,12 @@ class DeveloperShiftEndButton(discord.ui.Button):
         try:
             await interaction.user.remove_roles(
                 role,
-                reason="Developer-Schicht beendet"
+                reason=f"Developer-Schicht beendet von {interaction.user}"
             )
 
             log_channel = get_channel(SHIFT_LOG_CHANNEL_ID)
 
-            if log_channel:
+            if isinstance(log_channel, discord.TextChannel):
                 await log_channel.send(
                     f"🔴 **Developer-Schicht beendet**\n"
                     f"👤 {interaction.user.mention}"
@@ -1026,26 +951,19 @@ class DeveloperShiftEndButton(discord.ui.Button):
             )
 
 
-class DeveloperShiftView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
-        self.add_item(DeveloperShiftStartButton())
-        self.add_item(DeveloperShiftEndButton())
-
-
 async def update_developer_shift_panel():
 
     channel = get_channel(DEVELOPER_SHIFT_CHANNEL_ID)
 
-    if channel is None:
+    if not isinstance(channel, discord.TextChannel):
         return
 
+    await delete_old_panels(channel, SHIFT_PANEL_MARKER)
+
     embed = discord.Embed(
-        title="👨‍💻 Developer-Schicht",
+        title="🖥️ Developer-Schicht",
         description=(
-            "Hier kannst du deine Developer-Schicht verwalten.\n\n"
-            "🟢 **Schicht starten**\n"
-            "🔴 **Schicht beenden**"
+            "Nutze die Buttons, um deine Developer-Schicht zu starten oder zu beenden."
         ),
         color=discord.Color.green()
     )
@@ -1056,32 +974,6 @@ async def update_developer_shift_panel():
         inline=False
     )
 
-    found = False
-
-    async for message in channel.history(limit=50):
-
-        if message.author != bot.user:
-            continue
-
-        if not message.embeds:
-            continue
-
-        for field in message.embeds[0].fields:
-            if field.value == SHIFT_PANEL_MARKER:
-                found = True
-                break
-
-        if found:
-            try:
-                await message.edit(
-                    embed=embed,
-                    view=DeveloperShiftView()
-                )
-            except Exception:
-                pass
-
-            return
-
     await channel.send(
         embed=embed,
         view=DeveloperShiftView()
@@ -1089,235 +981,476 @@ async def update_developer_shift_panel():
 
 
 # =========================================================
-# COMMUNITY PANEL
+# VORSCHLÄGE
 # =========================================================
 
-class CommunitySuggestionModal(discord.ui.Modal):
-    def __init__(self):
-        super().__init__(title="💡 Vorschlag")
+def build_suggestion_embed(suggestion):
 
-        self.input = discord.ui.TextInput(
+    status = suggestion.get("status", "offen")
+
+    if status == "angenommen":
+        color = discord.Color.green()
+        status_text = "🟢 Angenommen"
+
+    elif status == "abgelehnt":
+        color = discord.Color.red()
+        status_text = "🔴 Abgelehnt"
+
+    else:
+        color = discord.Color.gold()
+        status_text = "🟡 Offen"
+
+    votes_for = len(suggestion.get("for_votes", []))
+    votes_against = len(suggestion.get("against_votes", []))
+
+    embed = discord.Embed(
+        title="💡 Community-Vorschlag",
+        description=suggestion["text"],
+        color=color,
+        timestamp=discord.utils.utcnow()
+    )
+
+    embed.add_field(
+        name="👤 Eingereicht von",
+        value=f"<@{suggestion['author_id']}>",
+        inline=False
+    )
+
+    embed.add_field(
+        name="📊 Status",
+        value=status_text,
+        inline=False
+    )
+
+    embed.add_field(
+        name="🟢 Dafür",
+        value=f"**{votes_for}**",
+        inline=True
+    )
+
+    embed.add_field(
+        name="🔴 Dagegen",
+        value=f"**{votes_against}**",
+        inline=True
+    )
+
+    embed.add_field(
+        name="🆔 Vorschlag",
+        value=f"`{suggestion['id']}`",
+        inline=False
+    )
+
+    embed.set_footer(
+        text="RLP Community • Vorschlagssystem"
+    )
+
+    return embed
+
+
+class SuggestionView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+        accept = Button(
+            label="Annehmen",
+            emoji="🟢",
+            style=discord.ButtonStyle.success,
+            custom_id="rlp_suggestion_accept"
+        )
+
+        reject = Button(
+            label="Ablehnen",
+            emoji="🔴",
+            style=discord.ButtonStyle.danger,
+            custom_id="rlp_suggestion_reject"
+        )
+
+        for_button = Button(
+            label="Für den Vorschlag",
+            emoji="🟢",
+            style=discord.ButtonStyle.success,
+            custom_id="rlp_suggestion_for"
+        )
+
+        against_button = Button(
+            label="Gegen den Vorschlag",
+            emoji="🔴",
+            style=discord.ButtonStyle.danger,
+            custom_id="rlp_suggestion_against"
+        )
+
+        accept.callback = self.accept_callback
+        reject.callback = self.reject_callback
+        for_button.callback = self.for_callback
+        against_button.callback = self.against_callback
+
+        self.add_item(accept)
+        self.add_item(reject)
+        self.add_item(for_button)
+        self.add_item(against_button)
+
+    async def accept_callback(self, interaction):
+
+        if not is_suggestion_reviewer(interaction.user):
+            await interaction.response.send_message(
+                "❌ Du hast keine Berechtigung, Vorschläge anzunehmen.",
+                ephemeral=True
+            )
+            return
+
+        suggestion = data["suggestions"].get(str(interaction.message.id))
+
+        if suggestion is None:
+            await interaction.response.send_message(
+                "❌ Dieser Vorschlag wurde nicht gefunden.",
+                ephemeral=True
+            )
+            return
+
+        suggestion["status"] = "angenommen"
+        save_data()
+
+        await interaction.response.edit_message(
+            embed=build_suggestion_embed(suggestion),
+            view=SuggestionView()
+        )
+
+    async def reject_callback(self, interaction):
+
+        if not is_suggestion_reviewer(interaction.user):
+            await interaction.response.send_message(
+                "❌ Du hast keine Berechtigung, Vorschläge abzulehnen.",
+                ephemeral=True
+            )
+            return
+
+        suggestion = data["suggestions"].get(str(interaction.message.id))
+
+        if suggestion is None:
+            await interaction.response.send_message(
+                "❌ Dieser Vorschlag wurde nicht gefunden.",
+                ephemeral=True
+            )
+            return
+
+        suggestion["status"] = "abgelehnt"
+        save_data()
+
+        await interaction.response.edit_message(
+            embed=build_suggestion_embed(suggestion),
+            view=SuggestionView()
+        )
+
+    async def for_callback(self, interaction):
+
+        suggestion = data["suggestions"].get(str(interaction.message.id))
+
+        if suggestion is None:
+            await interaction.response.send_message(
+                "❌ Dieser Vorschlag wurde nicht gefunden.",
+                ephemeral=True
+            )
+            return
+
+        user_id = interaction.user.id
+
+        for_votes = suggestion.setdefault("for_votes", [])
+        against_votes = suggestion.setdefault("against_votes", [])
+
+        if user_id in for_votes or user_id in against_votes:
+            await interaction.response.send_message(
+                "❌ Du hast bei diesem Vorschlag bereits abgestimmt.",
+                ephemeral=True
+            )
+            return
+
+        for_votes.append(user_id)
+        save_data()
+
+        await interaction.response.edit_message(
+            embed=build_suggestion_embed(suggestion),
+            view=SuggestionView()
+        )
+
+    async def against_callback(self, interaction):
+
+        suggestion = data["suggestions"].get(str(interaction.message.id))
+
+        if suggestion is None:
+            await interaction.response.send_message(
+                "❌ Dieser Vorschlag wurde nicht gefunden.",
+                ephemeral=True
+            )
+            return
+
+        user_id = interaction.user.id
+
+        for_votes = suggestion.setdefault("for_votes", [])
+        against_votes = suggestion.setdefault("against_votes", [])
+
+        if user_id in for_votes or user_id in against_votes:
+            await interaction.response.send_message(
+                "❌ Du hast bei diesem Vorschlag bereits abgestimmt.",
+                ephemeral=True
+            )
+            return
+
+        against_votes.append(user_id)
+        save_data()
+
+        await interaction.response.edit_message(
+            embed=build_suggestion_embed(suggestion),
+            view=SuggestionView()
+        )
+
+
+class SuggestionModal(Modal):
+    def __init__(self):
+        super().__init__(title="Vorschlag einreichen")
+
+        self.text_input = TextInput(
             label="Dein Vorschlag",
-            placeholder="Was möchtest du am Server verbessern?",
+            placeholder="Was möchtest du verbessern oder hinzufügen?",
             style=discord.TextStyle.paragraph,
             required=True,
             max_length=2000
         )
 
-        self.add_item(self.input)
+        self.add_item(self.text_input)
 
     async def on_submit(self, interaction):
 
         channel = get_channel(SUGGESTION_CHANNEL_ID)
 
-        if channel is None:
+        if not isinstance(channel, discord.TextChannel):
             await interaction.response.send_message(
-                "❌ Der Vorschlagskanal wurde nicht gefunden.",
+                "❌ Vorschlagskanal wurde nicht gefunden.",
                 ephemeral=True
             )
             return
 
-        embed = discord.Embed(
-            title="💡 Neuer Community-Vorschlag",
-            description=self.input.value,
-            color=discord.Color.gold(),
-            timestamp=discord.utils.utcnow()
+        next_id = len(data["suggestions"]) + 1
+
+        suggestion = {
+            "id": next_id,
+            "author_id": interaction.user.id,
+            "text": self.text_input.value,
+            "status": "offen",
+            "for_votes": [],
+            "against_votes": []
+        }
+
+        message = await channel.send(
+            embed=build_suggestion_embed(suggestion),
+            view=SuggestionView()
         )
 
-        embed.set_author(
-            name=interaction.user.display_name,
-            icon_url=interaction.user.display_avatar.url
-        )
-
-        embed.set_footer(
-            text=f"User ID: {interaction.user.id}"
-        )
-
-        await channel.send(embed=embed)
+        data["suggestions"][str(message.id)] = suggestion
+        save_data()
 
         await interaction.response.send_message(
-            "✅ Dein Vorschlag wurde erfolgreich eingereicht!",
+            f"✅ Dein Vorschlag wurde in {channel.mention} eingereicht.",
             ephemeral=True
         )
 
 
-class CommunityFeedbackModal(discord.ui.Modal):
-    def __init__(self):
-        super().__init__(title="💬 Feedback")
+# =========================================================
+# COMMUNITY PANEL
+# =========================================================
 
-        self.input = discord.ui.TextInput(
+class FeedbackModal(Modal):
+    def __init__(self):
+        super().__init__(title="Feedback")
+
+        self.text_input = TextInput(
             label="Dein Feedback",
-            placeholder="Was hältst du vom Server?",
+            placeholder="Was möchtest du uns mitteilen?",
             style=discord.TextStyle.paragraph,
             required=True,
             max_length=2000
         )
 
-        self.add_item(self.input)
+        self.add_item(self.text_input)
 
     async def on_submit(self, interaction):
 
         channel = get_channel(FEEDBACK_CHANNEL_ID)
 
-        if channel is None:
+        if not isinstance(channel, discord.TextChannel):
             await interaction.response.send_message(
-                "❌ Der Feedback-Kanal wurde nicht gefunden.",
+                "❌ Feedback-Kanal wurde nicht gefunden.",
                 ephemeral=True
             )
             return
 
         embed = discord.Embed(
-            title="💬 Neues Community-Feedback",
-            description=self.input.value,
+            title="💬 Neues Feedback",
+            description=self.text_input.value,
             color=discord.Color.blue(),
             timestamp=discord.utils.utcnow()
         )
 
-        embed.set_author(
-            name=interaction.user.display_name,
-            icon_url=interaction.user.display_avatar.url
-        )
-
-        embed.set_footer(
-            text=f"User ID: {interaction.user.id}"
+        embed.add_field(
+            name="👤 Von",
+            value=interaction.user.mention,
+            inline=False
         )
 
         await channel.send(embed=embed)
 
         await interaction.response.send_message(
-            "✅ Dein Feedback wurde erfolgreich gesendet!",
+            "✅ Dein Feedback wurde gesendet.",
             ephemeral=True
         )
 
 
-class CommunityBugModal(discord.ui.Modal):
+class BugModal(Modal):
     def __init__(self):
-        super().__init__(title="🐛 Bug melden")
+        super().__init__(title="Bug melden")
 
-        self.input = discord.ui.TextInput(
+        self.text_input = TextInput(
             label="Bug",
-            placeholder="Beschreibe den gefundenen Fehler...",
+            placeholder="Beschreibe den Fehler...",
             style=discord.TextStyle.paragraph,
             required=True,
             max_length=2000
         )
 
-        self.add_item(self.input)
+        self.add_item(self.text_input)
 
     async def on_submit(self, interaction):
 
         channel = get_channel(BUG_CHANNEL_ID)
 
-        if channel is None:
+        if not isinstance(channel, discord.TextChannel):
             await interaction.response.send_message(
-                "❌ Der Bug-Kanal wurde nicht gefunden.",
+                "❌ Bug-Kanal wurde nicht gefunden.",
                 ephemeral=True
             )
             return
 
         embed = discord.Embed(
-            title="🐛 Neue Bug-Meldung",
-            description=self.input.value,
+            title="🐞 Neuer Bug",
+            description=self.text_input.value,
             color=discord.Color.red(),
             timestamp=discord.utils.utcnow()
         )
 
-        embed.set_author(
-            name=interaction.user.display_name,
-            icon_url=interaction.user.display_avatar.url
-        )
-
-        embed.set_footer(
-            text=f"User ID: {interaction.user.id}"
+        embed.add_field(
+            name="👤 Gemeldet von",
+            value=interaction.user.mention,
+            inline=False
         )
 
         await channel.send(embed=embed)
 
         await interaction.response.send_message(
-            "✅ Deine Bug-Meldung wurde erfolgreich gesendet!",
+            "✅ Der Bug wurde gemeldet.",
             ephemeral=True
         )
 
 
-class CommunitySuggestionButton(discord.ui.Button):
+class CommunityPanelView(View):
     def __init__(self):
-        super().__init__(
+        super().__init__(timeout=None)
+
+        suggestion = Button(
             label="Vorschlag",
             emoji="💡",
             style=discord.ButtonStyle.primary,
             custom_id="rlp_community_suggestion"
         )
 
-    async def callback(self, interaction):
-        await interaction.response.send_modal(
-            CommunitySuggestionModal()
-        )
-
-
-class CommunityFeedbackButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(
+        feedback = Button(
             label="Feedback",
             emoji="💬",
             style=discord.ButtonStyle.primary,
             custom_id="rlp_community_feedback"
         )
 
-    async def callback(self, interaction):
-        await interaction.response.send_modal(
-            CommunityFeedbackModal()
-        )
-
-
-class CommunityBugButton(discord.ui.Button):
-    def __init__(self):
-        super().__init__(
+        bug = Button(
             label="Bug melden",
-            emoji="🐛",
+            emoji="🐞",
             style=discord.ButtonStyle.danger,
             custom_id="rlp_community_bug"
         )
 
-    async def callback(self, interaction):
-        await interaction.response.send_modal(
-            CommunityBugModal()
-        )
+        suggestion.callback = self.suggestion_callback
+        feedback.callback = self.feedback_callback
+        bug.callback = self.bug_callback
 
+        self.add_item(suggestion)
+        self.add_item(feedback)
+        self.add_item(bug)
 
-class CommunityPanelView(discord.ui.View):
-    def __init__(self):
-        super().__init__(timeout=None)
+    async def suggestion_callback(self, interaction):
+        await interaction.response.send_modal(SuggestionModal())
 
-        self.add_item(CommunitySuggestionButton())
-        self.add_item(CommunityFeedbackButton())
-        self.add_item(CommunityBugButton())
+    async def feedback_callback(self, interaction):
+        await interaction.response.send_modal(FeedbackModal())
+
+    async def bug_callback(self, interaction):
+        await interaction.response.send_modal(BugModal())
 
 
 async def update_community_panel():
 
-    # Das Panel wird in den aktuellen Community-Kanal
-    # nur über !communitypanel gepostet.
-    pass
+    message = await find_panel_message(COMMUNITY_PANEL_MARKER)
+
+    if message is None:
+        return
+
+    channel = message.channel
+
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+    embed = discord.Embed(
+        title="💬 Community",
+        description=(
+            "Hier kannst du uns deine Meinung mitteilen.\n\n"
+            "💡 **Vorschlag**\n"
+            "Sende einen Vorschlag an das Vorschlagssystem.\n\n"
+            "💬 **Feedback**\n"
+            "Sende uns Feedback.\n\n"
+            "🐞 **Bug melden**\n"
+            "Melde einen Fehler."
+        ),
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(
+        name="Panel",
+        value=COMMUNITY_PANEL_MARKER,
+        inline=False
+    )
+
+    await channel.send(
+        embed=embed,
+        view=CommunityPanelView()
+    )
 
 
 # =========================================================
 # OWNER PANEL
 # =========================================================
 
-class AnnouncementModal(discord.ui.Modal):
+class AnnouncementModal(Modal):
     def __init__(self, channel):
         super().__init__(title="Ankündigung")
 
         self.channel = channel
 
-        self.title_input = discord.ui.TextInput(
+        self.title_input = TextInput(
             label="Titel",
             placeholder="Titel der Ankündigung",
             required=True,
             max_length=256
         )
 
-        self.message_input = discord.ui.TextInput(
+        self.message_input = TextInput(
             label="Nachricht",
             placeholder="Text der Ankündigung...",
             style=discord.TextStyle.paragraph,
@@ -1349,7 +1482,6 @@ class AnnouncementModal(discord.ui.Modal):
         )
 
         try:
-
             await self.channel.send(embed=embed)
 
             await interaction.response.send_message(
@@ -1358,30 +1490,19 @@ class AnnouncementModal(discord.ui.Modal):
             )
 
         except discord.Forbidden:
-
             await interaction.response.send_message(
-                "❌ Der Bot kann in diesem Kanal keine Nachrichten "
-                "oder Embeds senden.",
-                ephemeral=True
-            )
-
-        except Exception as e:
-
-            print(f"Announcement Error: {e}")
-
-            await interaction.response.send_message(
-                "❌ Beim Senden ist ein Fehler aufgetreten.",
+                "❌ Der Bot kann dort keine Nachricht senden.",
                 ephemeral=True
             )
 
 
-class BotSayModal(discord.ui.Modal):
+class BotSayModal(Modal):
     def __init__(self, channel):
         super().__init__(title="Bot Say")
 
         self.channel = channel
 
-        self.message_input = discord.ui.TextInput(
+        self.message_input = TextInput(
             label="Nachricht",
             placeholder="Was soll der Bot schreiben?",
             style=discord.TextStyle.paragraph,
@@ -1401,10 +1522,7 @@ class BotSayModal(discord.ui.Modal):
             return
 
         try:
-
-            await self.channel.send(
-                self.message_input.value
-            )
+            await self.channel.send(self.message_input.value)
 
             await interaction.response.send_message(
                 f"✅ Nachricht wurde in {self.channel.mention} gesendet.",
@@ -1412,29 +1530,19 @@ class BotSayModal(discord.ui.Modal):
             )
 
         except discord.Forbidden:
-
             await interaction.response.send_message(
-                "❌ Der Bot kann in diesem Kanal nicht schreiben.",
-                ephemeral=True
-            )
-
-        except Exception as e:
-
-            print(f"Bot Say Error: {e}")
-
-            await interaction.response.send_message(
-                "❌ Beim Senden ist ein Fehler aufgetreten.",
+                "❌ Der Bot kann dort nicht schreiben.",
                 ephemeral=True
             )
 
 
-class OwnerChannelSelectView(discord.ui.View):
+class OwnerChannelSelectView(View):
     def __init__(self, action):
         super().__init__(timeout=180)
 
         self.action = action
 
-        self.select = discord.ui.ChannelSelect(
+        self.select = ChannelSelect(
             placeholder="Wähle einen Textkanal...",
             channel_types=[discord.ChannelType.text],
             min_values=1,
@@ -1454,30 +1562,26 @@ class OwnerChannelSelectView(discord.ui.View):
             )
             return
 
+        selected = self.select.values[0]
+
+        channel = interaction.guild.get_channel(selected.id)
+
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message(
+                "❌ Der ausgewählte Kanal ist kein Textkanal.",
+                ephemeral=True
+            )
+            return
+
         try:
 
-            selected = self.select.values[0]
-
-            channel_id = selected.id
-
-            channel = interaction.guild.get_channel(channel_id)
-
-            if not isinstance(channel, discord.TextChannel):
-                await interaction.response.send_message(
-                    "❌ Der ausgewählte Kanal ist kein Textkanal.",
-                    ephemeral=True
-                )
-                return
-
             if self.action == "announcement":
-
                 await interaction.response.send_modal(
                     AnnouncementModal(channel)
                 )
                 return
 
             if self.action == "say":
-
                 await interaction.response.send_modal(
                     BotSayModal(channel)
                 )
@@ -1485,9 +1589,7 @@ class OwnerChannelSelectView(discord.ui.View):
 
             if self.action == "lock":
 
-                await interaction.response.defer(
-                    ephemeral=True
-                )
+                await interaction.response.defer(ephemeral=True)
 
                 overwrite = channel.overwrites_for(
                     interaction.guild.default_role
@@ -1510,9 +1612,7 @@ class OwnerChannelSelectView(discord.ui.View):
 
             if self.action == "unlock":
 
-                await interaction.response.defer(
-                    ephemeral=True
-                )
+                await interaction.response.defer(ephemeral=True)
 
                 overwrite = channel.overwrites_for(
                     interaction.guild.default_role
@@ -1531,23 +1631,16 @@ class OwnerChannelSelectView(discord.ui.View):
                     ephemeral=True
                 )
 
-                return
-
         except discord.Forbidden:
 
             if interaction.response.is_done():
-
                 await interaction.followup.send(
-                    "❌ Der Bot hat für diesen Kanal "
-                    "nicht genügend Berechtigungen.",
+                    "❌ Der Bot hat dort nicht genügend Rechte.",
                     ephemeral=True
                 )
-
             else:
-
                 await interaction.response.send_message(
-                    "❌ Der Bot hat für diesen Kanal "
-                    "nicht genügend Berechtigungen.",
+                    "❌ Der Bot hat dort nicht genügend Rechte.",
                     ephemeral=True
                 )
 
@@ -1559,21 +1652,18 @@ class OwnerChannelSelectView(discord.ui.View):
             )
 
             if interaction.response.is_done():
-
                 await interaction.followup.send(
-                    "❌ Beim Ausführen ist ein Fehler aufgetreten.",
+                    f"❌ Fehler: `{e}`",
                     ephemeral=True
                 )
-
             else:
-
                 await interaction.response.send_message(
-                    "❌ Beim Ausführen ist ein Fehler aufgetreten.",
+                    f"❌ Fehler: `{e}`",
                     ephemeral=True
                 )
 
 
-class OwnerAnnouncementButton(discord.ui.Button):
+class OwnerAnnouncementButton(Button):
     def __init__(self):
         super().__init__(
             label="Ankündigung",
@@ -1598,7 +1688,7 @@ class OwnerAnnouncementButton(discord.ui.Button):
         )
 
 
-class OwnerSayButton(discord.ui.Button):
+class OwnerSayButton(Button):
     def __init__(self):
         super().__init__(
             label="Bot Say",
@@ -1617,13 +1707,13 @@ class OwnerSayButton(discord.ui.Button):
             return
 
         await interaction.response.send_message(
-            "💬 **Wähle den Kanal, in dem der Bot schreiben soll:**",
+            "💬 **Wähle den Kanal:**",
             view=OwnerChannelSelectView("say"),
             ephemeral=True
         )
 
 
-class OwnerLockButton(discord.ui.Button):
+class OwnerLockButton(Button):
     def __init__(self):
         super().__init__(
             label="Channel Lock",
@@ -1642,13 +1732,13 @@ class OwnerLockButton(discord.ui.Button):
             return
 
         await interaction.response.send_message(
-            "🔒 **Wähle den Kanal, der gesperrt werden soll:**",
+            "🔒 **Wähle den Kanal:**",
             view=OwnerChannelSelectView("lock"),
             ephemeral=True
         )
 
 
-class OwnerUnlockButton(discord.ui.Button):
+class OwnerUnlockButton(Button):
     def __init__(self):
         super().__init__(
             label="Channel Unlock",
@@ -1667,13 +1757,13 @@ class OwnerUnlockButton(discord.ui.Button):
             return
 
         await interaction.response.send_message(
-            "🔓 **Wähle den Kanal, der entsperrt werden soll:**",
+            "🔓 **Wähle den Kanal:**",
             view=OwnerChannelSelectView("unlock"),
             ephemeral=True
         )
 
 
-class OwnerStatusButton(discord.ui.Button):
+class OwnerStatusButton(Button):
     def __init__(self):
         super().__init__(
             label="Bot Status",
@@ -1729,10 +1819,8 @@ class OwnerStatusButton(discord.ui.Button):
 
         embed.add_field(
             name="⏱️ Uptime",
-            value=format_uptime(
-                time.time() - BOT_START_TIME
-            ),
-            inline=True
+            value=uptime_text(),
+            inline=False
         )
 
         await interaction.response.send_message(
@@ -1741,13 +1829,13 @@ class OwnerStatusButton(discord.ui.Button):
         )
 
 
-class OwnerServerInfoButton(discord.ui.Button):
+class OwnerServerInfoButton(Button):
     def __init__(self):
         super().__init__(
             label="Server Info",
             emoji="🖥️",
             style=discord.ButtonStyle.secondary,
-            custom_id="rlp_owner_server_info"
+            custom_id="rlp_owner_serverinfo"
         )
 
     async def callback(self, interaction):
@@ -1762,51 +1850,54 @@ class OwnerServerInfoButton(discord.ui.Button):
         guild = interaction.guild
 
         embed = discord.Embed(
-            title="🖥️ Server Informationen",
-            color=discord.Color.blurple()
+            title="🖥️ Server Info",
+            color=discord.Color.gold()
         )
 
         embed.add_field(
-            name="Server",
+            name="🏠 Server",
             value=guild.name,
             inline=True
         )
 
         embed.add_field(
-            name="Server ID",
+            name="🆔 Server ID",
             value=str(guild.id),
             inline=True
         )
 
         embed.add_field(
-            name="Mitglieder",
+            name="👥 Mitglieder",
             value=str(guild.member_count),
             inline=True
         )
 
         embed.add_field(
-            name="Kanäle",
-            value=str(len(guild.channels)),
+            name="💬 Textkanäle",
+            value=str(len(guild.text_channels)),
             inline=True
         )
 
         embed.add_field(
-            name="Rollen",
+            name="🔊 Sprachkanäle",
+            value=str(len(guild.voice_channels)),
+            inline=True
+        )
+
+        embed.add_field(
+            name="🎭 Rollen",
             value=str(len(guild.roles)),
             inline=True
         )
 
-        if guild.owner:
-            embed.add_field(
-                name="Owner",
-                value=guild.owner.mention,
-                inline=True
-            )
-
-        if guild.icon:
-            embed.set_thumbnail(
-                url=guild.icon.url
-            )
+        embed.add_field(
+            name="📅 Erstellt",
+            value=discord.utils.format_dt(
+                guild.created_at,
+                style="F"
+            ),
+            inline=False
+        )
 
         await interaction.response.send_message(
             embed=embed,
@@ -1814,7 +1905,7 @@ class OwnerServerInfoButton(discord.ui.Button):
         )
 
 
-class OwnerPanelView(discord.ui.View):
+class OwnerPanelView(View):
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -1831,24 +1922,17 @@ async def send_owner_panel(channel):
     embed = discord.Embed(
         title="👑 Owner Panel",
         description=(
-            "Hier kannst du verschiedene "
-            "Server- und Bot-Funktionen verwalten.\n\n"
-
+            "Hier kannst du verschiedene Server- und Bot-Funktionen verwalten.\n\n"
             "📢 **Ankündigung**\n"
             "Kanal auswählen → Titel und Nachricht eingeben.\n\n"
-
             "💬 **Bot Say**\n"
             "Kanal auswählen → Nachricht eingeben.\n\n"
-
             "🔒 **Channel Lock**\n"
             "Kanal auswählen → Kanal wird gesperrt.\n\n"
-
             "🔓 **Channel Unlock**\n"
             "Kanal auswählen → Kanal wird entsperrt.\n\n"
-
             "📊 **Bot Status**\n"
-            "Zeigt den aktuellen Bot-Status.\n\n"
-
+            "Zeigt den Bot-Status.\n\n"
             "🖥️ **Server Info**\n"
             "Zeigt Informationen über den Server."
         ),
@@ -1868,852 +1952,113 @@ async def send_owner_panel(channel):
 
 
 # =========================================================
-# COMMUNITY INFO COMMANDS
+# QUIZ
 # =========================================================
 
-@bot.command()
-async def help(ctx):
+async def reset_quiz():
 
-    embed = discord.Embed(
-        title="📚 Community Commands",
-        description="Alle Befehle für normale Mitglieder:",
-        color=discord.Color.blurple()
-    )
+    global quiz_message_id
+    global quiz_answer
+    global used_quiz_questions
 
-    embed.add_field(
-        name="👥 Community",
-        value=(
-            "`!suggest <Text>` — Vorschlag\n"
-            "`!feedback <Text>` — Feedback\n"
-            "`!bug <Text>` — Bug melden\n"
-            "`!report <Text>` — Problem melden"
-        ),
-        inline=False
-    )
+    channel = get_channel(QUIZ_CHANNEL_ID)
 
-    embed.add_field(
-        name="📊 Informationen",
-        value=(
-            "`!userinfo [@User]`\n"
-            "`!avatar [@User]`\n"
-            "`!serverinfo`\n"
-            "`!membercount`\n"
-            "`!ping`\n"
-            "`!uptime`"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="🎮 Fun",
-        value=(
-            "`!8ball <Frage>`\n"
-            "`!coinflip`\n"
-            "`!dice`\n"
-            "`!choose A | B | C`\n"
-            "`!random <Min> <Max>`\n"
-            "`!member`"
-        ),
-        inline=False
-    )
-
-    embed.add_field(
-        name="ℹ️ Weitere",
-        value=(
-            "`!rules`\n"
-            "`!socials`\n"
-            "`!website`\n"
-            "`!team`\n"
-            "`!apply`"
-        ),
-        inline=False
-    )
-
-    await ctx.send(embed=embed)
-
-
-@bot.command()
-async def ping(ctx):
-
-    await ctx.send(
-        f"🏓 Pong! `{round(bot.latency * 1000)}ms`"
-    )
-
-
-@bot.command()
-async def uptime(ctx):
-
-    await ctx.send(
-        f"⏱️ Der Bot ist seit "
-        f"**{format_uptime(time.time() - BOT_START_TIME)}** online."
-    )
-
-
-@bot.command()
-async def membercount(ctx):
-
-    await ctx.send(
-        f"👥 Aktuell befinden sich "
-        f"**{ctx.guild.member_count}** Mitglieder auf dem Server."
-    )
-
-
-@bot.command()
-async def serverinfo(ctx):
-
-    guild = ctx.guild
-
-    embed = discord.Embed(
-        title="🖥️ Serverinformationen",
-        color=discord.Color.blurple()
-    )
-
-    embed.add_field(
-        name="Server",
-        value=guild.name,
-        inline=True
-    )
-
-    embed.add_field(
-        name="Mitglieder",
-        value=str(guild.member_count),
-        inline=True
-    )
-
-    embed.add_field(
-        name="Kanäle",
-        value=str(len(guild.channels)),
-        inline=True
-    )
-
-    embed.add_field(
-        name="Rollen",
-        value=str(len(guild.roles)),
-        inline=True
-    )
-
-    embed.add_field(
-        name="Erstellt",
-        value=discord.utils.format_dt(
-            guild.created_at,
-            style="D"
-        ),
-        inline=True
-    )
-
-    if guild.owner:
-        embed.add_field(
-            name="Owner",
-            value=guild.owner.mention,
-            inline=True
-        )
-
-    if guild.icon:
-        embed.set_thumbnail(
-            url=guild.icon.url
-        )
-
-    await ctx.send(embed=embed)
-
-
-@bot.command()
-async def userinfo(ctx, member: discord.Member = None):
-
-    member = member or ctx.author
-
-    embed = discord.Embed(
-        title="👤 Benutzerinformationen",
-        color=discord.Color.blurple()
-    )
-
-    embed.set_thumbnail(
-        url=member.display_avatar.url
-    )
-
-    embed.add_field(
-        name="Name",
-        value=member.display_name,
-        inline=True
-    )
-
-    embed.add_field(
-        name="ID",
-        value=str(member.id),
-        inline=True
-    )
-
-    embed.add_field(
-        name="Account erstellt",
-        value=discord.utils.format_dt(
-            member.created_at,
-            style="D"
-        ),
-        inline=False
-    )
-
-    if member.joined_at:
-        embed.add_field(
-            name="Server beigetreten",
-            value=discord.utils.format_dt(
-                member.joined_at,
-                style="D"
-            ),
-            inline=False
-        )
-
-    roles = [
-        role.mention
-        for role in member.roles
-        if role != ctx.guild.default_role
-    ]
-
-    embed.add_field(
-        name="Rollen",
-        value=", ".join(roles) if roles else "Keine",
-        inline=False
-    )
-
-    await ctx.send(embed=embed)
-
-
-@bot.command()
-async def avatar(ctx, member: discord.Member = None):
-
-    member = member or ctx.author
-
-    embed = discord.Embed(
-        title=f"🖼️ Avatar von {member.display_name}",
-        color=discord.Color.blurple()
-    )
-
-    embed.set_image(
-        url=member.display_avatar.url
-    )
-
-    await ctx.send(embed=embed)
-
-
-@bot.command()
-async def botinfo(ctx):
-
-    embed = discord.Embed(
-        title="🤖 Bot Informationen",
-        color=discord.Color.blurple()
-    )
-
-    embed.add_field(
-        name="Bot",
-        value=str(bot.user),
-        inline=True
-    )
-
-    embed.add_field(
-        name="Server",
-        value=str(len(bot.guilds)),
-        inline=True
-    )
-
-    embed.add_field(
-        name="Ping",
-        value=f"{round(bot.latency * 1000)} ms",
-        inline=True
-    )
-
-    embed.add_field(
-        name="Uptime",
-        value=format_uptime(
-            time.time() - BOT_START_TIME
-        ),
-        inline=True
-    )
-
-    embed.add_field(
-        name="Python",
-        value=platform.python_version(),
-        inline=True
-    )
-
-    embed.add_field(
-        name="discord.py",
-        value=discord.__version__,
-        inline=True
-    )
-
-    await ctx.send(embed=embed)
-
-
-@bot.command()
-async def roleinfo(ctx, role: discord.Role):
-
-    embed = discord.Embed(
-        title="🎭 Rolleninformationen",
-        color=role.color
-    )
-
-    embed.add_field(
-        name="Rolle",
-        value=role.mention,
-        inline=True
-    )
-
-    embed.add_field(
-        name="ID",
-        value=str(role.id),
-        inline=True
-    )
-
-    embed.add_field(
-        name="Mitglieder",
-        value=str(len(role.members)),
-        inline=True
-    )
-
-    embed.add_field(
-        name="Position",
-        value=str(role.position),
-        inline=True
-    )
-
-    embed.add_field(
-        name="Verwaltet",
-        value="Ja" if role.managed else "Nein",
-        inline=True
-    )
-
-    await ctx.send(embed=embed)
-
-
-@bot.command()
-async def channelinfo(ctx, channel: discord.TextChannel = None):
-
-    channel = channel or ctx.channel
-
-    embed = discord.Embed(
-        title="📁 Kanalinformationen",
-        color=discord.Color.blurple()
-    )
-
-    embed.add_field(
-        name="Kanal",
-        value=channel.mention,
-        inline=True
-    )
-
-    embed.add_field(
-        name="ID",
-        value=str(channel.id),
-        inline=True
-    )
-
-    embed.add_field(
-        name="Kategorie",
-        value=channel.category.name
-        if channel.category else "Keine",
-        inline=True
-    )
-
-    embed.add_field(
-        name="Erstellt",
-        value=discord.utils.format_dt(
-            channel.created_at,
-            style="D"
-        ),
-        inline=False
-    )
-
-    await ctx.send(embed=embed)
-
-
-@bot.command()
-async def rolelist(ctx):
-
-    roles = [
-        role.mention
-        for role in reversed(ctx.guild.roles)
-        if role != ctx.guild.default_role
-    ]
-
-    text = "\n".join(roles)
-
-    if not text:
-        text = "Keine Rollen vorhanden."
-
-    if len(text) > 4000:
-        text = text[:3950] + "\n..."
-
-    embed = discord.Embed(
-        title="🎭 Rollen",
-        description=text,
-        color=discord.Color.blurple()
-    )
-
-    await ctx.send(embed=embed)
-
-
-@bot.command()
-async def channellist(ctx):
-
-    text_channels = len(ctx.guild.text_channels)
-    voice_channels = len(ctx.guild.voice_channels)
-    categories = len(ctx.guild.categories)
-
-    embed = discord.Embed(
-        title="📁 Kanalübersicht",
-        color=discord.Color.blurple()
-    )
-
-    embed.add_field(
-        name="💬 Textkanäle",
-        value=str(text_channels),
-        inline=True
-    )
-
-    embed.add_field(
-        name="🔊 Sprachkanäle",
-        value=str(voice_channels),
-        inline=True
-    )
-
-    embed.add_field(
-        name="📂 Kategorien",
-        value=str(categories),
-        inline=True
-    )
-
-    await ctx.send(embed=embed)
-
-
-# =========================================================
-# COMMUNITY COMMANDS
-# =========================================================
-
-async def send_community_submission(
-    ctx,
-    channel_id,
-    title,
-    text_content,
-    color,
-    emoji
-):
-
-    channel = get_channel(channel_id)
-
-    if channel is None:
-        await ctx.send(
-            "❌ Der Zielkanal wurde nicht gefunden.",
-            delete_after=5
-        )
+    if not isinstance(channel, discord.TextChannel):
         return
 
-    embed = discord.Embed(
-        title=f"{emoji} {title}",
-        description=text_content,
-        color=color,
-        timestamp=discord.utils.utcnow()
-    )
-
-    embed.set_author(
-        name=ctx.author.display_name,
-        icon_url=ctx.author.display_avatar.url
-    )
-
-    embed.set_footer(
-        text=f"User ID: {ctx.author.id}"
-    )
-
-    await channel.send(embed=embed)
-
-    await ctx.send(
-        f"✅ Deine Meldung wurde erfolgreich eingereicht!",
-        delete_after=5
-    )
-
-
-@bot.command()
-async def suggest(ctx, *, text=None):
-
-    if not text:
-        await ctx.send(
-            "❌ Nutzung: `!suggest <Dein Vorschlag>`",
-            delete_after=6
-        )
-        return
-
-    await send_community_submission(
-        ctx,
-        SUGGESTION_CHANNEL_ID,
-        "Neuer Vorschlag",
-        text,
-        discord.Color.gold(),
-        "💡"
-    )
-
-
-@bot.command()
-async def feedback(ctx, *, text=None):
-
-    if not text:
-        await ctx.send(
-            "❌ Nutzung: `!feedback <Dein Feedback>`",
-            delete_after=6
-        )
-        return
-
-    await send_community_submission(
-        ctx,
-        FEEDBACK_CHANNEL_ID,
-        "Neues Feedback",
-        text,
-        discord.Color.blue(),
-        "💬"
-    )
-
-
-@bot.command()
-async def bug(ctx, *, text=None):
-
-    if not text:
-        await ctx.send(
-            "❌ Nutzung: `!bug <Beschreibung des Bugs>`",
-            delete_after=6
-        )
-        return
-
-    await send_community_submission(
-        ctx,
-        BUG_CHANNEL_ID,
-        "Neue Bug-Meldung",
-        text,
-        discord.Color.red(),
-        "🐛"
-    )
+    # Altes Quiz löschen, falls bekannt
+    if quiz_message_id:
 
+        try:
+            old_message = await channel.fetch_message(
+                quiz_message_id
+            )
 
-@bot.command()
-async def report(ctx, *, text=None):
+            await old_message.delete()
 
-    if not text:
-        await ctx.send(
-            "❌ Nutzung: `!report <Beschreibung>`",
-            delete_after=6
-        )
-        return
+        except Exception:
+            pass
 
-    await send_community_submission(
-        ctx,
-        BUG_CHANNEL_ID,
-        "Neue Meldung",
-        text,
-        discord.Color.red(),
-        "🚨"
-    )
+    quiz_message_id = None
+    quiz_answer = None
 
+    # Falls die ID nach Neustart unbekannt ist:
+    # nur Nachrichten löschen, die eindeutig wie unser Quiz aussehen.
+    try:
 
-@bot.command()
-async def rules(ctx):
+        async for message in channel.history(limit=30):
 
-    await ctx.send(
-        "📜 **Serverregeln**\n\n"
-        "> Bitte verhalte dich respektvoll gegenüber allen Mitgliedern.\n"
-        "> Kein Spam, keine Beleidigungen und kein unnötiges Drama.\n"
-        "> Die vollständigen Regeln findest du im Regelkanal."
-    )
+            if message.author.id != bot.user.id:
+                continue
 
+            if message.content.startswith("🧠 **Emoji Quiz"):
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
 
-@bot.command()
-async def socials(ctx):
+    except Exception:
+        pass
 
-    await ctx.send(
-        "🌐 **Unsere Socials**\n\n"
-        "> Die Social-Media-Links können hier ergänzt werden."
-    )
+    await send_quiz_question()
 
 
-@bot.command()
-async def website(ctx):
+async def send_quiz_question():
 
-    await ctx.send(
-        "🌐 **Website**\n\n"
-        "> Unsere Website ist hier erreichbar."
-    )
+    global quiz_message_id
+    global quiz_answer
+    global quiz_starting
+    global used_quiz_questions
 
+    async with quiz_lock:
 
-@bot.command()
-async def team(ctx):
+        if quiz_starting:
+            return
 
-    embed = discord.Embed(
-        title="👥 Team",
-        description=(
-            "Die Teammitglieder findest du in der "
-            "entsprechenden Teamübersicht des Servers."
-        ),
-        color=discord.Color.blurple()
-    )
+        quiz_starting = True
 
-    await ctx.send(embed=embed)
+        try:
 
+            channel = get_channel(QUIZ_CHANNEL_ID)
 
-@bot.command()
-async def apply(ctx):
+            if not isinstance(channel, discord.TextChannel):
+                return
 
-    channel = get_channel(APPLICATION_CHANNEL_ID)
+            available = [
+                q for i, q in enumerate(QUIZ_QUESTIONS)
+                if i not in used_quiz_questions
+            ]
 
-    if channel:
+            if not available:
 
-        await ctx.send(
-            f"📝 Bewerbungen kannst du hier einreichen: "
-            f"{channel.mention}",
-            delete_after=10
-        )
+                used_quiz_questions.clear()
 
-    else:
+                available = QUIZ_QUESTIONS.copy()
 
-        await ctx.send(
-            "❌ Der Bewerbungskanal wurde nicht gefunden.",
-            delete_after=5
-        )
+            index, question = random_module.choice(
+                [
+                    (i, q)
+                    for i, q in enumerate(QUIZ_QUESTIONS)
+                    if i not in used_quiz_questions
+                ]
+            )
 
+            used_quiz_questions.add(index)
 
-@bot.command()
-async def support(ctx):
+            emoji_text, answer = question
 
-    channel = get_channel(SUPPORT_VOICE_CHANNEL_ID)
+            message = await channel.send(
+                f"🧠 **Emoji Quiz**\n\n"
+                f"{emoji_text}\n\n"
+                f"Schreibe deine Antwort!"
+            )
 
-    if channel:
+            quiz_message_id = message.id
+            quiz_answer = answer.lower()
 
-        await ctx.send(
-            f"🎧 **Support**\n\n"
-            f"Bei Fragen kannst du unserem Support beitreten:\n"
-            f"{channel.mention}"
-        )
+        finally:
 
-    else:
-
-        await ctx.send(
-            "❌ Der Support-Kanal wurde nicht gefunden."
-        )
-
-
-@bot.command()
-async def supportinfo(ctx):
-
-    channel = get_channel(SUPPORT_VOICE_CHANNEL_ID)
-
-    await ctx.send(
-        f"🎧 **Support-Informationen**\n\n"
-        f"Bei Fragen oder Problemen kannst du unserem Support "
-        f"beitreten.\n\n"
-        f"📍 Kanal: {channel.mention if channel else 'Nicht gefunden'}"
-    )
-
-
-# =========================================================
-# FUN
-# =========================================================
-
-EIGHT_BALL_ANSWERS = [
-    "Ja.",
-    "Nein.",
-    "Sehr wahrscheinlich.",
-    "Eher nicht.",
-    "Sieht gut aus.",
-    "Frag später nochmal.",
-    "Definitiv.",
-    "Das ist schwer zu sagen."
-]
-
-
-@bot.command(name="8ball")
-async def eightball(ctx, *, question=None):
-
-    if not question:
-        await ctx.send(
-            "❌ Nutzung: `!8ball <Frage>`",
-            delete_after=5
-        )
-        return
-
-    await ctx.send(
-        f"🎱 **8-Ball**\n\n"
-        f"❓ {question}\n"
-        f"💬 **{random.choice(EIGHT_BALL_ANSWERS)}**"
-    )
-
-
-@bot.command()
-async def coinflip(ctx):
-
-    result = random.choice(
-        ["Kopf", "Zahl"]
-    )
-
-    await ctx.send(
-        f"🪙 Die Münze zeigt: **{result}**!"
-    )
-
-
-@bot.command()
-async def dice(ctx):
-
-    number = random.randint(1, 6)
-
-    await ctx.send(
-        f"🎲 Du hast eine **{number}** gewürfelt!"
-    )
-
-
-@bot.command()
-async def choose(ctx, *, choices=None):
-
-    if not choices:
-        await ctx.send(
-            "❌ Nutzung: `!choose A | B | C`",
-            delete_after=5
-        )
-        return
-
-    options = [
-        option.strip()
-        for option in choices.split("|")
-        if option.strip()
-    ]
-
-    if len(options) < 2:
-        await ctx.send(
-            "❌ Gib mindestens zwei Optionen an.",
-            delete_after=5
-        )
-        return
-
-    result = random.choice(options)
-
-    await ctx.send(
-        f"🎯 Meine Auswahl: **{result}**"
-    )
-
-
-@bot.command()
-async def random(ctx, minimum: int = None, maximum: int = None):
-
-    if minimum is None or maximum is None:
-        await ctx.send(
-            "❌ Nutzung: `!random <Min> <Max>`",
-            delete_after=5
-        )
-        return
-
-    if minimum > maximum:
-        minimum, maximum = maximum, minimum
-
-    number = random_module.randint(
-        minimum,
-        maximum
-    )
-
-    await ctx.send(
-        f"🎲 Zufallszahl: **{number}**"
-    )
-
-
-# Alias für den random-Befehl, damit der Python-Name
-# random nicht mit dem Modul kollidiert.
-random_module = random
-
-
-@bot.command()
-async def serverage(ctx):
-
-    delta = datetime.now(timezone.utc) - ctx.guild.created_at
-
-    days = delta.days
-
-    await ctx.send(
-        f"📅 Dieser Server ist **{days} Tage** alt."
-    )
-
-
-@bot.command()
-async def member(ctx):
-
-    members = [
-        m for m in ctx.guild.members
-        if not m.bot
-    ]
-
-    if not members:
-        await ctx.send(
-            "❌ Keine Mitglieder gefunden."
-        )
-        return
-
-    selected = random.choice(members)
-
-    await ctx.send(
-        f"🎲 Zufälliges Community-Mitglied:\n"
-        f"👤 {selected.mention}"
-    )
-
-
-# =========================================================
-# OWNER COMMANDS
-# =========================================================
-
-@bot.command()
-async def ownerpanel(ctx):
-
-    if not is_owner(ctx.author):
-        await ctx.send(
-            "❌ Du hast keine Berechtigung.",
-            delete_after=5
-        )
-        return
-
-    await send_owner_panel(ctx.channel)
-
-
-@bot.command()
-async def owner(ctx):
-
-    if not is_owner(ctx.author):
-        await ctx.send(
-            "❌ Du hast keine Berechtigung.",
-            delete_after=5
-        )
-        return
-
-    await send_owner_panel(ctx.channel)
-
-
-@bot.command()
-async def communitypanel(ctx):
-
-    embed = discord.Embed(
-        title="🌐 Community Panel",
-        description=(
-            "Hier kannst du direkt mit dem Server interagieren.\n\n"
-
-            "💡 **Vorschlag**\n"
-            "Du hast eine Idee für den Server?\n\n"
-
-            "💬 **Feedback**\n"
-            "Teile uns deine Meinung mit.\n\n"
-
-            "🐛 **Bug melden**\n"
-            "Du hast einen Fehler gefunden?"
-        ),
-        color=discord.Color.blurple()
-    )
-
-    embed.add_field(
-        name="Panel",
-        value=COMMUNITY_PANEL_MARKER,
-        inline=False
-    )
-
-    await ctx.send(
-        embed=embed,
-        view=CommunityPanelView()
-    )
+            quiz_starting = False
 
 
 # =========================================================
@@ -2721,24 +2066,16 @@ async def communitypanel(ctx):
 # =========================================================
 
 @bot.event
-async def on_voice_state_update(
-    member,
-    before,
-    after
-):
+async def on_voice_state_update(member, before, after):
 
-    log_channel = get_channel(
-        SUPPORT_LOG_CHANNEL_ID
-    )
+    log_channel = get_channel(SUPPORT_LOG_CHANNEL_ID)
 
-    if log_channel is None:
+    if not isinstance(log_channel, discord.TextChannel):
         return
 
-    support_channel = get_channel(
-        SUPPORT_VOICE_CHANNEL_ID
-    )
+    support_channel = get_channel(SUPPORT_VOICE_CHANNEL_ID)
 
-    if support_channel is None:
+    if not isinstance(support_channel, discord.VoiceChannel):
         return
 
     if (
@@ -2784,11 +2121,7 @@ async def on_message(message):
             await safe_delete(message)
             return
 
-        user_answer = (
-            message.content
-            .strip()
-            .lower()
-        )
+        user_answer = message.content.strip().lower()
 
         if user_answer == quiz_answer:
 
@@ -2799,16 +2132,11 @@ async def on_message(message):
             if current_question_id:
 
                 try:
-
-                    question_message = (
-                        await message.channel.fetch_message(
-                            current_question_id
-                        )
+                    question_message = await message.channel.fetch_message(
+                        current_question_id
                     )
 
-                    await safe_delete(
-                        question_message
-                    )
+                    await safe_delete(question_message)
 
                 except Exception:
                     pass
@@ -2822,9 +2150,7 @@ async def on_message(message):
 
             await asyncio.sleep(4)
 
-            await safe_delete(
-                success_message
-            )
+            await safe_delete(success_message)
 
             await send_quiz_question()
 
@@ -2838,13 +2164,988 @@ async def on_message(message):
 
         await asyncio.sleep(4)
 
-        await safe_delete(
-            wrong_message
-        )
+        await safe_delete(wrong_message)
 
         return
 
     await bot.process_commands(message)
+
+
+# =========================================================
+# OWNER / SERVER COMMANDS
+# =========================================================
+
+@bot.command()
+async def ping(ctx):
+    await ctx.send(
+        f"🏓 Pong! `{round(bot.latency * 1000)}ms`"
+    )
+
+
+@bot.command()
+async def ownerpanel(ctx):
+
+    if not is_owner(ctx.author):
+        await ctx.send(
+            "❌ Du hast keine Berechtigung.",
+            delete_after=5
+        )
+        return
+
+    await send_owner_panel(ctx.channel)
+
+
+@bot.command()
+async def owner(ctx):
+
+    if not is_owner(ctx.author):
+        await ctx.send(
+            "❌ Du hast keine Berechtigung.",
+            delete_after=5
+        )
+        return
+
+    await send_owner_panel(ctx.channel)
+
+
+@bot.command()
+async def serverinfo(ctx):
+
+    guild = ctx.guild
+
+    embed = discord.Embed(
+        title="🖥️ Server Info",
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(
+        name="Server",
+        value=guild.name,
+        inline=True
+    )
+
+    embed.add_field(
+        name="Mitglieder",
+        value=str(guild.member_count),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Rollen",
+        value=str(len(guild.roles)),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Textkanäle",
+        value=str(len(guild.text_channels)),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Sprachkanäle",
+        value=str(len(guild.voice_channels)),
+        inline=True
+    )
+
+    await ctx.send(embed=embed)
+
+
+@bot.command()
+async def botinfo(ctx):
+
+    embed = discord.Embed(
+        title="🤖 Bot Info",
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(
+        name="Bot",
+        value=str(bot.user),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Server",
+        value=str(len(bot.guilds)),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Uptime",
+        value=uptime_text(),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Ping",
+        value=f"{round(bot.latency * 1000)} ms",
+        inline=True
+    )
+
+    await ctx.send(embed=embed)
+
+
+@bot.command()
+async def userinfo(ctx, member: discord.Member = None):
+
+    member = member or ctx.author
+
+    embed = discord.Embed(
+        title="👤 User Info",
+        color=discord.Color.blue()
+    )
+
+    embed.set_thumbnail(
+        url=member.display_avatar.url
+    )
+
+    embed.add_field(
+        name="Name",
+        value=member.display_name,
+        inline=True
+    )
+
+    embed.add_field(
+        name="ID",
+        value=str(member.id),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Account erstellt",
+        value=discord.utils.format_dt(
+            member.created_at,
+            style="F"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="Server beigetreten",
+        value=discord.utils.format_dt(
+            member.joined_at,
+            style="F"
+        ) if member.joined_at else "Unbekannt",
+        inline=False
+    )
+
+    await ctx.send(embed=embed)
+
+
+@bot.command()
+async def roleinfo(ctx, role: discord.Role):
+
+    embed = discord.Embed(
+        title="🎭 Rollen Info",
+        color=role.color
+    )
+
+    embed.add_field(
+        name="Name",
+        value=role.name,
+        inline=True
+    )
+
+    embed.add_field(
+        name="ID",
+        value=str(role.id),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Mitglieder",
+        value=str(len(role.members)),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Position",
+        value=str(role.position),
+        inline=True
+    )
+
+    await ctx.send(embed=embed)
+
+
+@bot.command()
+async def channelinfo(
+    ctx,
+    channel: discord.TextChannel = None
+):
+
+    channel = channel or ctx.channel
+
+    embed = discord.Embed(
+        title="📺 Kanal Info",
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(
+        name="Name",
+        value=channel.name,
+        inline=True
+    )
+
+    embed.add_field(
+        name="ID",
+        value=str(channel.id),
+        inline=True
+    )
+
+    embed.add_field(
+        name="Kategorie",
+        value=channel.category.name if channel.category else "Keine",
+        inline=True
+    )
+
+    await ctx.send(embed=embed)
+
+
+@bot.command()
+async def avatar(ctx, member: discord.Member = None):
+
+    member = member or ctx.author
+
+    embed = discord.Embed(
+        title=f"🖼️ Avatar von {member.display_name}",
+        color=discord.Color.blue()
+    )
+
+    embed.set_image(
+        url=member.display_avatar.url
+    )
+
+    await ctx.send(embed=embed)
+
+
+@bot.command()
+async def banner(ctx, member: discord.Member = None):
+
+    member = member or ctx.author
+
+    user = await bot.fetch_user(member.id)
+
+    if user.banner is None:
+        await ctx.send(
+            "ℹ️ Dieser User hat keinen Banner."
+        )
+        return
+
+    embed = discord.Embed(
+        title=f"🖼️ Banner von {member.display_name}",
+        color=discord.Color.blue()
+    )
+
+    embed.set_image(
+        url=user.banner.url
+    )
+
+    await ctx.send(embed=embed)
+
+
+@bot.command()
+async def membercount(ctx):
+
+    await ctx.send(
+        f"👥 Der Server hat **{ctx.guild.member_count} Mitglieder**."
+    )
+
+
+@bot.command()
+async def rolelist(ctx):
+
+    roles = [
+        role.mention
+        for role in reversed(ctx.guild.roles)
+        if role.name != "@everyone"
+    ]
+
+    if not roles:
+        await ctx.send("Keine Rollen vorhanden.")
+        return
+
+    text = "\n".join(roles)
+
+    if len(text) > 4000:
+        text = text[:3990] + "..."
+
+    embed = discord.Embed(
+        title="🎭 Rollen",
+        description=text,
+        color=discord.Color.blue()
+    )
+
+    await ctx.send(embed=embed)
+
+
+@bot.command()
+async def channellist(ctx):
+
+    channels = [
+        channel.mention
+        for channel in ctx.guild.channels
+    ]
+
+    text = "\n".join(channels)
+
+    if len(text) > 4000:
+        text = text[:3990] + "..."
+
+    embed = discord.Embed(
+        title="📺 Kanäle",
+        description=text,
+        color=discord.Color.blue()
+    )
+
+    await ctx.send(embed=embed)
+
+
+# =========================================================
+# COMMUNITY COMMANDS
+# =========================================================
+
+@bot.command()
+async def suggest(ctx, *, text=None):
+
+    if not text:
+        await ctx.send(
+            "❌ Benutzung: `!suggest Dein Vorschlag`",
+            delete_after=8
+        )
+        return
+
+    channel = get_channel(SUGGESTION_CHANNEL_ID)
+
+    if not isinstance(channel, discord.TextChannel):
+        await ctx.send(
+            "❌ Vorschlagskanal nicht gefunden.",
+            delete_after=5
+        )
+        return
+
+    suggestion = {
+        "id": len(data["suggestions"]) + 1,
+        "author_id": ctx.author.id,
+        "text": text,
+        "status": "offen",
+        "for_votes": [],
+        "against_votes": []
+    }
+
+    message = await channel.send(
+        embed=build_suggestion_embed(suggestion),
+        view=SuggestionView()
+    )
+
+    data["suggestions"][str(message.id)] = suggestion
+    save_data()
+
+    await ctx.send(
+        f"✅ Dein Vorschlag wurde in {channel.mention} gesendet.",
+        delete_after=5
+    )
+
+
+@bot.command()
+async def feedback(ctx, *, text=None):
+
+    if not text:
+        await ctx.send(
+            "❌ Benutzung: `!feedback Dein Feedback`",
+            delete_after=8
+        )
+        return
+
+    channel = get_channel(FEEDBACK_CHANNEL_ID)
+
+    if not isinstance(channel, discord.TextChannel):
+        await ctx.send(
+            "❌ Feedback-Kanal nicht gefunden.",
+            delete_after=5
+        )
+        return
+
+    embed = discord.Embed(
+        title="💬 Neues Feedback",
+        description=text,
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(
+        name="👤 Von",
+        value=ctx.author.mention,
+        inline=False
+    )
+
+    await channel.send(embed=embed)
+
+    await ctx.send(
+        "✅ Feedback wurde gesendet.",
+        delete_after=5
+    )
+
+
+@bot.command()
+async def bug(ctx, *, text=None):
+
+    if not text:
+        await ctx.send(
+            "❌ Benutzung: `!bug Beschreibung`",
+            delete_after=8
+        )
+        return
+
+    channel = get_channel(BUG_CHANNEL_ID)
+
+    if not isinstance(channel, discord.TextChannel):
+        await ctx.send(
+            "❌ Bug-Kanal nicht gefunden.",
+            delete_after=5
+        )
+        return
+
+    embed = discord.Embed(
+        title="🐞 Neuer Bug",
+        description=text,
+        color=discord.Color.red()
+    )
+
+    embed.add_field(
+        name="👤 Gemeldet von",
+        value=ctx.author.mention,
+        inline=False
+    )
+
+    await channel.send(embed=embed)
+
+    await ctx.send(
+        "✅ Bug wurde gemeldet.",
+        delete_after=5
+    )
+
+
+@bot.command()
+async def report(ctx, *, text=None):
+
+    if not text:
+        await ctx.send(
+            "❌ Benutzung: `!report Beschreibung`",
+            delete_after=8
+        )
+        return
+
+    channel = get_channel(BUG_CHANNEL_ID)
+
+    if isinstance(channel, discord.TextChannel):
+
+        embed = discord.Embed(
+            title="🚨 Meldung",
+            description=text,
+            color=discord.Color.red()
+        )
+
+        embed.add_field(
+            name="👤 Von",
+            value=ctx.author.mention,
+            inline=False
+        )
+
+        await channel.send(embed=embed)
+
+    await ctx.send(
+        "✅ Deine Meldung wurde weitergeleitet.",
+        delete_after=5
+    )
+
+
+@bot.command()
+async def apply(ctx):
+
+    channel = get_channel(APPLICATION_CHANNEL_ID)
+
+    if isinstance(channel, discord.TextChannel):
+        await ctx.send(
+            f"📋 Bewerben kannst du dich in {channel.mention}.",
+            delete_after=8
+        )
+    else:
+        await ctx.send(
+            "📋 Der Bewerbungskanal wurde nicht gefunden.",
+            delete_after=5
+        )
+
+
+@bot.command()
+async def support(ctx):
+
+    channel = get_channel(SUPPORT_VOICE_CHANNEL_ID)
+
+    if isinstance(channel, discord.VoiceChannel):
+
+        await ctx.send(
+            f"🔊 Support findest du hier: {channel.mention}"
+        )
+
+    else:
+        await ctx.send(
+            "❌ Support-Kanal nicht gefunden."
+        )
+
+
+@bot.command()
+async def supportinfo(ctx):
+
+    channel = get_channel(SUPPORT_VOICE_CHANNEL_ID)
+
+    if isinstance(channel, discord.VoiceChannel):
+
+        await ctx.send(
+            f"🔊 **Support**\n\n"
+            f"Wenn du Hilfe brauchst, komm in {channel.mention}."
+        )
+
+    else:
+        await ctx.send(
+            "❌ Support-Kanal nicht gefunden."
+        )
+
+
+# =========================================================
+# FUN
+# =========================================================
+
+@bot.command(name="8ball")
+async def eightball(ctx, *, question=None):
+
+    if not question:
+        await ctx.send(
+            "🎱 Stell mir eine Frage."
+        )
+        return
+
+    answers = [
+        "Ja.",
+        "Nein.",
+        "Vielleicht.",
+        "Sehr wahrscheinlich.",
+        "Eher nicht.",
+        "Ich denke schon.",
+        "Ich glaube nicht."
+    ]
+
+    await ctx.send(
+        f"🎱 **8-Ball:** {random_module.choice(answers)}"
+    )
+
+
+@bot.command()
+async def coinflip(ctx):
+
+    result = random_module.choice(
+        ["Kopf", "Zahl"]
+    )
+
+    await ctx.send(
+        f"🪙 **{result}**"
+    )
+
+
+@bot.command()
+async def dice(ctx):
+
+    number = random_module.randint(1, 6)
+
+    await ctx.send(
+        f"🎲 Du hast eine **{number}** gewürfelt."
+    )
+
+
+@bot.command()
+async def choose(ctx, *, choices=None):
+
+    if not choices:
+        await ctx.send(
+            "❌ Benutzung: `!choose A | B | C`"
+        )
+        return
+
+    options = [
+        option.strip()
+        for option in choices.split("|")
+        if option.strip()
+    ]
+
+    if len(options) < 2:
+        await ctx.send(
+            "❌ Gib mindestens zwei Möglichkeiten an."
+        )
+        return
+
+    await ctx.send(
+        f"🤔 Ich wähle: **{random_module.choice(options)}**"
+    )
+
+
+@bot.command(name="random")
+async def random_number(ctx, minimum=None, maximum=None):
+
+    try:
+
+        minimum = int(minimum)
+        maximum = int(maximum)
+
+    except Exception:
+
+        await ctx.send(
+            "❌ Benutzung: `!random 1 100`"
+        )
+        return
+
+    if minimum > maximum:
+        minimum, maximum = maximum, minimum
+
+    number = random_module.randint(
+        minimum,
+        maximum
+    )
+
+    await ctx.send(
+        f"🎲 Zufallszahl: **{number}**"
+    )
+
+
+@bot.command()
+async def serverage(ctx):
+
+    created = ctx.guild.created_at
+
+    await ctx.send(
+        f"📅 Der Server wurde am "
+        f"{discord.utils.format_dt(created, style='D')} erstellt."
+    )
+
+
+@bot.command()
+async def member(ctx):
+
+    await ctx.send(
+        f"👤 Du bist **{ctx.author.display_name}**."
+    )
+
+
+# =========================================================
+# PRAKTISCHE COMMANDS
+# =========================================================
+
+@bot.command()
+async def uptime(ctx):
+
+    await ctx.send(
+        f"⏱️ Bot-Uptime: **{uptime_text()}**"
+    )
+
+
+@bot.command()
+async def invite(ctx):
+
+    permissions = discord.Permissions(
+        view_channel=True,
+        send_messages=True,
+        embed_links=True,
+        read_message_history=True
+    )
+
+    url = discord.utils.oauth_url(
+        bot.user.id,
+        permissions=permissions,
+        scopes=("bot",)
+    )
+
+    await ctx.send(
+        f"🔗 **Bot einladen:**\n{url}"
+    )
+
+
+@bot.command()
+async def rules(ctx):
+
+    rules_channel = None
+
+    for channel in ctx.guild.text_channels:
+
+        if channel.name.lower() in [
+            "regeln",
+            "rules",
+            "server-regeln"
+        ]:
+            rules_channel = channel
+            break
+
+    if rules_channel:
+
+        await ctx.send(
+            f"📜 Unsere Regeln findest du hier: "
+            f"{rules_channel.mention}"
+        )
+
+    else:
+
+        await ctx.send(
+            "📜 Einen festen Regelkanal konnte ich nicht finden."
+        )
+
+
+@bot.command()
+async def socials(ctx):
+
+    await ctx.send(
+        "🌐 **Socials**\n"
+        "Unsere Social-Media-Links kannst du hier eintragen."
+    )
+
+
+@bot.command()
+async def website(ctx):
+
+    await ctx.send(
+        "🌐 Die Website ist aktuell noch nicht hinterlegt."
+    )
+
+
+@bot.command()
+async def team(ctx):
+
+    await ctx.send(
+        "👥 **Team**\n"
+        "Unser Team findest du auf dem Server."
+    )
+
+
+@bot.command()
+async def status(ctx):
+
+    await ctx.send(
+        f"🟢 **Online**\n"
+        f"📡 Ping: `{round(bot.latency * 1000)}ms`\n"
+        f"⏱️ Uptime: `{uptime_text()}`"
+    )
+
+
+# =========================================================
+# PANEL COMMANDS
+# =========================================================
+
+@bot.command()
+async def communitypanel(ctx):
+
+    if not is_owner(ctx.author):
+        await ctx.send(
+            "❌ Du hast keine Berechtigung.",
+            delete_after=5
+        )
+        return
+
+    await send_community_panel_here(ctx.channel)
+
+    await ctx.send(
+        "✅ Community-Panel erstellt.",
+        delete_after=5
+    )
+
+
+async def send_community_panel_here(channel):
+
+    embed = discord.Embed(
+        title="💬 Community",
+        description=(
+            "Hier kannst du uns deine Meinung mitteilen.\n\n"
+            "💡 **Vorschlag**\n"
+            "Reiche einen Vorschlag ein.\n\n"
+            "💬 **Feedback**\n"
+            "Sende uns Feedback.\n\n"
+            "🐞 **Bug melden**\n"
+            "Melde einen Fehler."
+        ),
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(
+        name="Panel",
+        value=COMMUNITY_PANEL_MARKER,
+        inline=False
+    )
+
+    await channel.send(
+        embed=embed,
+        view=CommunityPanelView()
+    )
+
+
+# =========================================================
+# HELP
+# =========================================================
+
+@bot.command()
+async def help(ctx):
+
+    embed = discord.Embed(
+        title="📚 RLP Bot Hilfe",
+        description="Hier findest du die wichtigsten Befehle.",
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(
+        name="🛠️ Allgemein",
+        value=(
+            "`!ping`\n"
+            "`!help`\n"
+            "`!uptime`\n"
+            "`!invite`\n"
+            "`!status`\n"
+            "`!serverinfo`\n"
+            "`!botinfo`"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="👤 Mitglieder",
+        value=(
+            "`!userinfo @User`\n"
+            "`!avatar @User`\n"
+            "`!banner @User`\n"
+            "`!membercount`\n"
+            "`!roleinfo @Rolle`\n"
+            "`!channelinfo #Kanal`\n"
+            "`!rolelist`\n"
+            "`!channellist`"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="💬 Community",
+        value=(
+            "`!suggest <Text>`\n"
+            "`!feedback <Text>`\n"
+            "`!bug <Text>`\n"
+            "`!report <Text>`\n"
+            "`!apply`\n"
+            "`!support`\n"
+            "`!supportinfo`"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🎮 Fun",
+        value=(
+            "`!8ball <Frage>`\n"
+            "`!coinflip`\n"
+            "`!dice`\n"
+            "`!choose A | B | C`\n"
+            "`!random 1 100`\n"
+            "`!serverage`\n"
+            "`!member`"
+        ),
+        inline=False
+    )
+
+    await ctx.send(embed=embed)
+
+
+# =========================================================
+# COMMAND ERROR
+# =========================================================
+
+@bot.event
+async def on_command_error(ctx, error):
+
+    if isinstance(error, commands.CommandNotFound):
+        return
+
+    if isinstance(error, commands.MissingRequiredArgument):
+
+        await ctx.send(
+            "❌ Es fehlt ein Argument.",
+            delete_after=5
+        )
+        return
+
+    if isinstance(error, commands.MemberNotFound):
+
+        await ctx.send(
+            "❌ Mitglied nicht gefunden.",
+            delete_after=5
+        )
+        return
+
+    if isinstance(error, commands.RoleNotFound):
+
+        await ctx.send(
+            "❌ Rolle nicht gefunden.",
+            delete_after=5
+        )
+        return
+
+    if isinstance(error, commands.ChannelNotFound):
+
+        await ctx.send(
+            "❌ Kanal nicht gefunden.",
+            delete_after=5
+        )
+        return
+
+    print(
+        f"COMMAND ERROR in {ctx.command}: "
+        f"{type(error).__name__}: {error}"
+    )
+
+
+# =========================================================
+# SETUP HOOK
+# =========================================================
+
+@bot.event
+async def setup_hook():
+
+    # Persistent Buttons / Views
+    bot.add_view(NametagView())
+    bot.add_view(LicensePlateView())
+    bot.add_view(ApplicationView())
+    bot.add_view(DeveloperTaskView())
+    bot.add_view(DeveloperShiftView())
+    bot.add_view(SuggestionView())
+    bot.add_view(CommunityPanelView())
+    bot.add_view(OwnerPanelView())
+
+    # Alte Slash-Commands dieses Bots entfernen
+    try:
+
+        guild_obj = discord.Object(id=GUILD_ID)
+
+        bot.tree.clear_commands(
+            guild=guild_obj
+        )
+
+        await bot.tree.sync(
+            guild=guild_obj
+        )
+
+        bot.tree.clear_commands(
+            guild=None
+        )
+
+        await bot.tree.sync()
+
+        print("Slash-Commands wurden entfernt.")
+
+    except Exception as e:
+
+        print(
+            f"Slash-Command Cleanup Fehler: {e}"
+        )
 
 
 # =========================================================
@@ -2859,15 +3160,7 @@ async def on_ready():
     print(f"Guilds: {len(bot.guilds)}")
     print("====================================")
 
-    # Persistent Views
-    bot.add_view(NametagView())
-    bot.add_view(LicensePlateView())
-    bot.add_view(ApplicationView())
-    bot.add_view(DeveloperTaskView())
-    bot.add_view(DeveloperShiftView())
-    bot.add_view(OwnerPanelView())
-    bot.add_view(CommunityPanelView())
-
+    # Panels aktualisieren
     try:
         await update_nametag_panel()
     except Exception as e:
@@ -2894,7 +3187,38 @@ async def on_ready():
         print(f"Developer Shift Panel Fehler: {e}")
 
     try:
-        await send_quiz_question()
+        await update_community_panel()
+    except Exception as e:
+        print(f"Community Panel Fehler: {e}")
+
+    # Owner Panel nur aktualisieren,
+    # wenn bereits eines existiert
+    try:
+
+        owner_message = await find_panel_message(
+            OWNER_PANEL_MARKER
+        )
+
+        if owner_message:
+
+            owner_channel = owner_message.channel
+
+            try:
+                await owner_message.delete()
+            except Exception:
+                pass
+
+            await send_owner_panel(owner_channel)
+
+    except Exception as e:
+
+        print(
+            f"Owner Panel Fehler: {e}"
+        )
+
+    # Emoji-Quiz aktualisieren
+    try:
+        await reset_quiz()
     except Exception as e:
         print(f"Quiz Fehler: {e}")
 
@@ -2904,9 +3228,6 @@ async def on_ready():
 # =========================================================
 
 if not TOKEN:
-    raise RuntimeError(
-        "DISCORD_TOKEN wurde nicht gefunden."
-    )
-
-
-bot.run(TOKEN)
+    print("❌ DISCORD_TOKEN wurde nicht gefunden.")
+else:
+    bot.run(TOKEN)
