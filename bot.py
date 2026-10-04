@@ -3,11 +3,16 @@ import json
 import time
 import random
 import asyncio
+import re
 from datetime import datetime, timezone, timedelta
 
 import discord
 from discord.ext import commands
 
+
+# =========================================================
+# CONFIG
+# =========================================================
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 
@@ -23,6 +28,9 @@ SHIFT_LOG_CHANNEL_ID = 1540797414863151155
 
 SUGGESTION_CHANNEL_ID = 1540773028642947234
 FEEDBACK_CHANNEL_ID = 1556072540307333200
+
+# Zahlenspiel
+NUMBER_GAME_CHANNEL_ID = 1556308645942136872
 
 NAMETAG_ROLE_ID = 1520102928398942348
 SHIFT_PERMISSION_ROLE_ID = 1523674698574200904
@@ -42,6 +50,8 @@ DEV_TASK_PANEL_MARKER = "RLP_DEV_TASK_PANEL"
 DEV_SHIFT_PANEL_MARKER = "RLP_DEV_SHIFT_PANEL"
 COMMUNITY_PANEL_MARKER = "RLP_COMMUNITY_PANEL"
 OWNER_PANEL_MARKER = "RLP_OWNER_PANEL"
+EMOJI_QUIZ_PANEL_MARKER = "RLP_EMOJI_QUIZ_PANEL"
+NUMBER_GAME_PANEL_MARKER = "RLP_NUMBER_GAME_PANEL"
 
 PREFIX = "?"
 
@@ -54,9 +64,17 @@ STATUS_TEXTS = [
     "💻 Developed by RyZe 🚀"
 ]
 
+# Emoji-Quiz-Limits
+EMOJI_LIMIT = 3
+EMOJI_RESET_SECONDS = 2 * 60 * 60
+
 status_task = None
 startup_done = False
 
+
+# =========================================================
+# INTENTS / BOT
+# =========================================================
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -70,69 +88,45 @@ bot = commands.Bot(
 )
 
 
+# =========================================================
+# DEFAULT DATA
+# =========================================================
+
 DEFAULT_DATA = {
     "license_plates": {},
     "applications": {},
     "developer_tasks": {},
     "active_developer_shifts": {},
     "suggestions": {},
-    "feedback": []
+    "feedback": [],
+
+    # Neues Emoji-Quiz
+    "emoji_quiz": {},
+
+    # Neues Zahlenspiel
+    "number_game": {
+        "current_number": 1,
+        "last_user_id": None,
+        "wrong_attempts": {},
+        "message_id": None,
+        "last_easter_egg": 0
+    }
 }
 
 
-def load_data():
-    if not os.path.exists(DATA_FILE):
-        save_data(DEFAULT_DATA)
-        return json.loads(json.dumps(DEFAULT_DATA))
-
-    try:
-        with open(DATA_FILE, "r", encoding="utf-8") as file:
-            loaded = json.load(file)
-    except Exception:
-        loaded = {}
-
-    changed = False
-
-    for key, value in DEFAULT_DATA.items():
-        if key not in loaded:
-            loaded[key] = json.loads(json.dumps(value))
-            changed = True
-
-    if not isinstance(loaded.get("license_plates"), dict):
-        loaded["license_plates"] = {}
-        changed = True
-
-    if not isinstance(loaded.get("applications"), dict):
-        loaded["applications"] = {}
-        changed = True
-
-    if not isinstance(loaded.get("developer_tasks"), dict):
-        loaded["developer_tasks"] = {}
-        changed = True
-
-    if not isinstance(loaded.get("active_developer_shifts"), dict):
-        loaded["active_developer_shifts"] = {}
-        changed = True
-
-    if not isinstance(loaded.get("suggestions"), dict):
-        loaded["suggestions"] = {}
-        changed = True
-
-    if not isinstance(loaded.get("feedback"), list):
-        loaded["feedback"] = []
-        changed = True
-
-    if changed:
-        save_data(loaded)
-
-    return loaded
-
+# =========================================================
+# DATA SYSTEM
+# =========================================================
 
 def save_data(content):
     temp_file = DATA_FILE + ".tmp"
 
     try:
-        with open(temp_file, "w", encoding="utf-8") as file:
+        with open(
+            temp_file,
+            "w",
+            encoding="utf-8"
+        ) as file:
             json.dump(
                 content,
                 file,
@@ -140,30 +134,155 @@ def save_data(content):
                 indent=4
             )
 
-        os.replace(temp_file, DATA_FILE)
+        os.replace(
+            temp_file,
+            DATA_FILE
+        )
 
     except Exception as error:
-        print(f"Speicherfehler: {error}")
+        print(
+            f"Speicherfehler: {error}"
+        )
+
+
+def load_data():
+    if not os.path.exists(DATA_FILE):
+        save_data(
+            DEFAULT_DATA
+        )
+
+        return json.loads(
+            json.dumps(DEFAULT_DATA)
+        )
+
+    try:
+        with open(
+            DATA_FILE,
+            "r",
+            encoding="utf-8"
+        ) as file:
+            loaded = json.load(file)
+
+    except Exception:
+        loaded = {}
+
+    changed = False
+
+    for key, value in DEFAULT_DATA.items():
+        if key not in loaded:
+            loaded[key] = json.loads(
+                json.dumps(value)
+            )
+
+            changed = True
+
+    # Alte Datenstrukturen absichern
+    dictionary_keys = [
+        "license_plates",
+        "applications",
+        "developer_tasks",
+        "active_developer_shifts",
+        "suggestions",
+        "emoji_quiz"
+    ]
+
+    for key in dictionary_keys:
+        if not isinstance(
+            loaded.get(key),
+            dict
+        ):
+            loaded[key] = {}
+            changed = True
+
+    if not isinstance(
+        loaded.get("feedback"),
+        list
+    ):
+        loaded["feedback"] = []
+        changed = True
+
+    if not isinstance(
+        loaded.get("number_game"),
+        dict
+    ):
+        loaded["number_game"] = json.loads(
+            json.dumps(
+                DEFAULT_DATA["number_game"]
+            )
+        )
+
+        changed = True
+
+    for key, value in DEFAULT_DATA[
+        "number_game"
+    ].items():
+
+        if key not in loaded[
+            "number_game"
+        ]:
+            loaded[
+                "number_game"
+            ][key] = json.loads(
+                json.dumps(value)
+            )
+
+            changed = True
+
+    if not isinstance(
+        loaded["number_game"].get(
+            "wrong_attempts"
+        ),
+        dict
+    ):
+        loaded["number_game"][
+            "wrong_attempts"
+        ] = {}
+
+        changed = True
+
+    if changed:
+        save_data(
+            loaded
+        )
+
+    return loaded
 
 
 data = load_data()
 
 
+# =========================================================
+# BASIC HELPERS
+# =========================================================
+
 def get_guild():
-    return bot.get_guild(GUILD_ID)
+    return bot.get_guild(
+        GUILD_ID
+    )
 
 
 def get_channel(channel_id):
-    channel = bot.get_channel(channel_id)
+    channel = bot.get_channel(
+        channel_id
+    )
 
-    if isinstance(channel, discord.TextChannel):
+    if isinstance(
+        channel,
+        discord.TextChannel
+    ):
         return channel
 
     return None
 
 
-def member_has_role(member, role_id):
-    if not isinstance(member, discord.Member):
+def member_has_role(
+    member,
+    role_id
+):
+    if not isinstance(
+        member,
+        discord.Member
+    ):
         return False
 
     return any(
@@ -204,7 +323,9 @@ def make_embed(
         title=title,
         description=description,
         color=color,
-        timestamp=datetime.now(timezone.utc)
+        timestamp=datetime.now(
+            timezone.utc
+        )
     )
 
     result.set_footer(
@@ -229,6 +350,7 @@ async def error_response(
                 message,
                 ephemeral=True
             )
+
     except Exception:
         pass
 
@@ -237,7 +359,9 @@ async def find_panel(
     channel_id,
     marker
 ):
-    channel = get_channel(channel_id)
+    channel = get_channel(
+        channel_id
+    )
 
     if channel is None:
         return None
@@ -250,10 +374,14 @@ async def find_panel(
                 return message
 
             for item in message.embeds:
-                if marker in (item.title or ""):
+                if marker in (
+                    item.title or ""
+                ):
                     return message
 
-                if marker in (item.description or ""):
+                if marker in (
+                    item.description or ""
+                ):
                     return message
 
     except Exception as error:
@@ -270,10 +398,12 @@ async def update_panel(
     panel_embed,
     view
 ):
-    channel = get_channel(channel_id)
+    channel = get_channel(
+        channel_id
+    )
 
     if channel is None:
-        return
+        return None
 
     old_message = await find_panel(
         channel_id,
@@ -289,12 +419,14 @@ async def update_panel(
                 embed=panel_embed,
                 view=view
             )
-        else:
-            await channel.send(
-                content=content,
-                embed=panel_embed,
-                view=view
-            )
+
+            return old_message
+
+        return await channel.send(
+            content=content,
+            embed=panel_embed,
+            view=view
+        )
 
     except discord.Forbidden:
         print(
@@ -305,6 +437,8 @@ async def update_panel(
         print(
             f"Panel-Fehler: {error}"
         )
+
+    return None
 
 
 # =========================================================
@@ -328,9 +462,13 @@ async def rotate_bot_status():
 
             index = (
                 index + 1
-            ) % len(STATUS_TEXTS)
+            ) % len(
+                STATUS_TEXTS
+            )
 
-            await asyncio.sleep(15)
+            await asyncio.sleep(
+                15
+            )
 
         except asyncio.CancelledError:
             break
@@ -340,7 +478,9 @@ async def rotate_bot_status():
                 f"Status-Fehler: {error}"
             )
 
-            await asyncio.sleep(15)
+            await asyncio.sleep(
+                15
+            )
 
 
 # =========================================================
@@ -351,10 +491,14 @@ def remove_nametag(name):
     if not name:
         return name
 
-    if name.startswith("RLP | "):
+    if name.startswith(
+        "RLP | "
+    ):
         return name[6:]
 
-    if name.startswith("RLP |\u00a0"):
+    if name.startswith(
+        "RLP |\u00a0"
+    ):
         return name[6:]
 
     return name
@@ -423,9 +567,7 @@ class NametagSet(
                 "❌ Du hast bereits einen RLP-Nametag."
             )
 
-        new_name = (
-            NAMETAG + current
-        )
+        new_name = NAMETAG + current
 
         if len(new_name) > 32:
             return await error_response(
@@ -1186,6 +1328,7 @@ def shift_panel():
     )
 
     guild = get_guild()
+
     active = data[
         "active_developer_shifts"
     ]
@@ -1204,6 +1347,7 @@ def shift_panel():
     lines = []
 
     for user_id, information in active.items():
+
         member = None
 
         try:
@@ -1299,6 +1443,7 @@ async def shift_log(
         await channel.send(
             embed=result
         )
+
     except Exception as error:
         print(
             f"Shift-Log: {error}"
@@ -1339,7 +1484,9 @@ class ShiftStart(
                 "❌ Du hast keine Berechtigung für Developer-Schichten."
             )
 
-        key = str(member.id)
+        key = str(
+            member.id
+        )
 
         if key in data[
             "active_developer_shifts"
@@ -1440,7 +1587,9 @@ class ShiftEnd(
                 "❌ Du hast keine Berechtigung für Developer-Schichten."
             )
 
-        key = str(member.id)
+        key = str(
+            member.id
+        )
 
         shift = data[
             "active_developer_shifts"
@@ -2152,6 +2301,1313 @@ class SuggestionView(
 
 
 # =========================================================
+# EMOJI QUIZ
+# =========================================================
+
+EMOJI_QUESTIONS = [
+    {
+        "emoji": "🍎📱",
+        "answer": "apple",
+        "aliases": [
+            "apple",
+            "iphone"
+        ],
+        "category": "Technik / Marke",
+        "hints": [
+            "Es geht um eine bekannte Technikmarke.",
+            "Die Marke ist besonders für Smartphones und Computer bekannt.",
+            "Der Name ist gleichzeitig eine englische Frucht."
+        ]
+    },
+    {
+        "emoji": "🕷️🦸",
+        "answer": "spiderman",
+        "aliases": [
+            "spiderman",
+            "spider man",
+            "spider-man"
+        ],
+        "category": "Film / Comic",
+        "hints": [
+            "Es geht um eine bekannte Figur.",
+            "Die Figur hat mit einer Spinne zu tun.",
+            "Der Name beginnt mit Spider."
+        ]
+    },
+    {
+        "emoji": "❄️👸",
+        "answer": "eiskoenigin",
+        "aliases": [
+            "eiskoenigin",
+            "eiskönigin",
+            "frozen"
+        ],
+        "category": "Film",
+        "hints": [
+            "Es geht um einen bekannten Animationsfilm.",
+            "Schnee und Eis spielen eine wichtige Rolle.",
+            "Der englische Titel lautet Frozen."
+        ]
+    },
+    {
+        "emoji": "🌧️☂️",
+        "answer": "regen",
+        "aliases": [
+            "regen"
+        ],
+        "category": "Wetter",
+        "hints": [
+            "Es geht um Wetter.",
+            "Ein Regenschirm kann dabei sehr hilfreich sein.",
+            "Wasser fällt vom Himmel."
+        ]
+    },
+    {
+        "emoji": "🌙⭐",
+        "answer": "nacht",
+        "aliases": [
+            "nacht"
+        ],
+        "category": "Zeit",
+        "hints": [
+            "Es geht um eine Tageszeit.",
+            "Man sieht dabei häufig Sterne.",
+            "Sie kommt nach dem Abend."
+        ]
+    },
+    {
+        "emoji": "🚒🔥",
+        "answer": "feuerwehr",
+        "aliases": [
+            "feuerwehr"
+        ],
+        "category": "Einsatzdienst",
+        "hints": [
+            "Es geht um einen Einsatzdienst.",
+            "Die Einheit hilft unter anderem bei Bränden.",
+            "Die Fahrzeuge sind häufig rot."
+        ]
+    },
+    {
+        "emoji": "⚽🥅",
+        "answer": "fussball",
+        "aliases": [
+            "fussball",
+            "fußball"
+        ],
+        "category": "Sport",
+        "hints": [
+            "Es geht um eine Sportart.",
+            "Ein Ball und ein Tor spielen eine wichtige Rolle.",
+            "Die Sportart wird weltweit gespielt."
+        ]
+    },
+    {
+        "emoji": "🎄🎁",
+        "answer": "weihnachten",
+        "aliases": [
+            "weihnachten"
+        ],
+        "category": "Feiertag",
+        "hints": [
+            "Es geht um einen bekannten Feiertag.",
+            "Geschenke spielen dabei häufig eine Rolle.",
+            "Der Feiertag ist im Dezember."
+        ]
+    },
+    {
+        "emoji": "🍕🇮🇹",
+        "answer": "pizza",
+        "aliases": [
+            "pizza"
+        ],
+        "category": "Essen",
+        "hints": [
+            "Es geht um ein bekanntes Gericht.",
+            "Das Gericht wird stark mit Italien verbunden.",
+            "Es wird meistens in Stücke geschnitten."
+        ]
+    },
+    {
+        "emoji": "🐝🍯",
+        "answer": "honig",
+        "aliases": [
+            "honig"
+        ],
+        "category": "Natur / Essen",
+        "hints": [
+            "Es geht um ein Naturprodukt.",
+            "Bienen haben damit zu tun.",
+            "Es ist süß."
+        ]
+    },
+    {
+        "emoji": "🚗⛽",
+        "answer": "auto",
+        "aliases": [
+            "auto"
+        ],
+        "category": "Verkehr",
+        "hints": [
+            "Es geht um ein Fahrzeug.",
+            "Es wird normalerweise auf Straßen benutzt.",
+            "Viele Fahrzeuge benötigen Kraftstoff."
+        ]
+    },
+    {
+        "emoji": "🐶🏠",
+        "answer": "hund",
+        "aliases": [
+            "hund"
+        ],
+        "category": "Tier",
+        "hints": [
+            "Es geht um ein Haustier.",
+            "Viele Menschen halten dieses Tier zu Hause.",
+            "Es bellt häufig."
+        ]
+    },
+    {
+        "emoji": "🐱🐟",
+        "answer": "katze",
+        "aliases": [
+            "katze"
+        ],
+        "category": "Tier",
+        "hints": [
+            "Es geht um ein Haustier.",
+            "Das Tier miaut.",
+            "Es wird häufig mit Fischen in Verbindung gebracht."
+        ]
+    },
+    {
+        "emoji": "🌊🏖️☀️",
+        "answer": "urlaub",
+        "aliases": [
+            "urlaub"
+        ],
+        "category": "Freizeit",
+        "hints": [
+            "Es geht um freie Zeit.",
+            "Viele Menschen fahren dafür ans Meer.",
+            "Strand und Sonne passen dazu."
+        ]
+    },
+    {
+        "emoji": "🎮🕹️",
+        "answer": "gaming",
+        "aliases": [
+            "gaming",
+            "videospiel",
+            "videospiele"
+        ],
+        "category": "Freizeit",
+        "hints": [
+            "Es geht um eine beliebte Freizeitbeschäftigung.",
+            "Controller können dazugehören.",
+            "Man spielt dabei digitale Spiele."
+        ]
+    }
+]
+
+
+def normalize_quiz_answer(
+    value
+):
+    value = str(
+        value
+    ).lower().strip()
+
+    replacements = {
+        "ä": "ae",
+        "ö": "oe",
+        "ü": "ue",
+        "ß": "ss"
+    }
+
+    for old, new in replacements.items():
+        value = value.replace(
+            old,
+            new
+        )
+
+    value = re.sub(
+        r"[^a-z0-9 ]",
+        "",
+        value
+    )
+
+    value = re.sub(
+        r"\s+",
+        " ",
+        value
+    )
+
+    return value
+
+
+def get_quiz_state(
+    user_id
+):
+    key = str(
+        user_id
+    )
+
+    if key not in data[
+        "emoji_quiz"
+    ]:
+        data[
+            "emoji_quiz"
+        ][key] = {
+            "active": False,
+            "question_index": None,
+            "tips_used": 0,
+            "letters_used": 0,
+            "skips_used": 0,
+            "usage_reset_at": (
+                time.time()
+                + EMOJI_RESET_SECONDS
+            ),
+            "score": 0,
+            "solved": 0,
+            "skipped": 0,
+            "total": 0,
+            "last_action": 0
+        }
+
+    state = data[
+        "emoji_quiz"
+    ][key]
+
+    defaults = {
+        "active": False,
+        "question_index": None,
+        "tips_used": 0,
+        "letters_used": 0,
+        "skips_used": 0,
+        "usage_reset_at": (
+            time.time()
+            + EMOJI_RESET_SECONDS
+        ),
+        "score": 0,
+        "solved": 0,
+        "skipped": 0,
+        "total": 0,
+        "last_action": 0
+    }
+
+    for key2, value in defaults.items():
+        if key2 not in state:
+            state[key2] = value
+
+    # =====================================================
+    # 2-STUNDEN-RESET
+    # =====================================================
+
+    if time.time() >= state[
+        "usage_reset_at"
+    ]:
+
+        state[
+            "tips_used"
+        ] = 0
+
+        state[
+            "letters_used"
+        ] = 0
+
+        state[
+            "skips_used"
+        ] = 0
+
+        state[
+            "usage_reset_at"
+        ] = (
+            time.time()
+            + EMOJI_RESET_SECONDS
+        )
+
+        save_data(
+            data
+        )
+
+    return state
+
+
+def quiz_reset_text(
+    state
+):
+    seconds = max(
+        0,
+        int(
+            state["usage_reset_at"]
+            - time.time()
+        )
+    )
+
+    hours = seconds // 3600
+    minutes = (
+        seconds % 3600
+    ) // 60
+
+    return (
+        f"🔄 Alle Nutzungen werden automatisch "
+        f"in **{hours} Std. {minutes} Min.** zurückgesetzt."
+    )
+
+
+def quiz_limit_message(
+    category,
+    used
+):
+    return (
+        f"⛔ **{category}-Limit erreicht**\n\n"
+        f"Du hast bereits **{used}/3** Nutzungen "
+        f"für **{category}** verwendet.\n\n"
+        f"🔒 Weitere Nutzungen dieser Kategorie "
+        f"sind momentan nicht verfügbar.\n"
+        f"🔄 Das Limit wird automatisch alle **2 Stunden** zurückgesetzt."
+    )
+
+
+def quiz_remaining_text(
+    state
+):
+    return (
+        f"💡 Tipps: **{state['tips_used']}/3**\n"
+        f"🔤 Anfangsbuchstaben: **{state['letters_used']}/3**\n"
+        f"⏭️ Überspringen: **{state['skips_used']}/3**"
+    )
+
+
+def current_quiz_question(
+    state
+):
+    index = state.get(
+        "question_index"
+    )
+
+    if index is None:
+        return None
+
+    if not (
+        0 <= index < len(
+            EMOJI_QUESTIONS
+        )
+    ):
+        return None
+
+    return EMOJI_QUESTIONS[
+        index
+    ]
+
+
+def quiz_embed(
+    state
+):
+    question = current_quiz_question(
+        state
+    )
+
+    if question is None:
+        return make_embed(
+            "🎭 Emoji-Quiz",
+            (
+                "Klicke auf **▶️ Neues Quiz**, "
+                "um eine Aufgabe zu starten."
+            ),
+            discord.Color.blurple()
+        )
+
+    return make_embed(
+        "🎭 Emoji-Quiz",
+        (
+            f"## {question['emoji']}\n\n"
+            f"🏷️ Kategorie: **{question['category']}**\n\n"
+            "✍️ Schreibe deine Antwort einfach in den Chat.\n\n"
+            f"{quiz_remaining_text(state)}\n"
+            f"{quiz_reset_text(state)}"
+        ),
+        discord.Color.blurple()
+    )
+
+
+def quiz_pick_question(
+    state
+):
+    old_index = state.get(
+        "question_index"
+    )
+
+    available = list(
+        range(
+            len(EMOJI_QUESTIONS)
+        )
+    )
+
+    if (
+        old_index is not None
+        and len(available) > 1
+    ):
+        available.remove(
+            old_index
+        )
+
+    state[
+        "question_index"
+    ] = random.choice(
+        available
+    )
+
+    state[
+        "active"
+    ] = True
+
+
+class EmojiQuizNew(
+    discord.ui.Button
+):
+    def __init__(self):
+        super().__init__(
+            label="Neues Quiz",
+            emoji="▶️",
+            style=discord.ButtonStyle.success,
+            custom_id="rlp_emoji_new"
+        )
+
+    async def callback(
+        self,
+        interaction
+    ):
+        state = get_quiz_state(
+            interaction.user.id
+        )
+
+        # Neues Quiz setzt NICHT die drei Nutzungslimits zurück.
+        quiz_pick_question(
+            state
+        )
+
+        state[
+            "total"
+        ] += 1
+
+        save_data(
+            data
+        )
+
+        await interaction.response.send_message(
+            embed=quiz_embed(
+                state
+            ),
+            ephemeral=True
+        )
+
+
+class EmojiQuizHint(
+    discord.ui.Button
+):
+    def __init__(self):
+        super().__init__(
+            label="Tipp anfordern",
+            emoji="💡",
+            style=discord.ButtonStyle.primary,
+            custom_id="rlp_emoji_hint"
+        )
+
+    async def callback(
+        self,
+        interaction
+    ):
+        state = get_quiz_state(
+            interaction.user.id
+        )
+
+        if not state["active"]:
+            return await error_response(
+                interaction,
+                "❌ Starte zuerst ein neues Quiz."
+            )
+
+        if state[
+            "tips_used"
+        ] >= EMOJI_LIMIT:
+
+            return await error_response(
+                interaction,
+                quiz_limit_message(
+                    "💡 Tipp anfordern",
+                    state["tips_used"]
+                )
+                + "\n\n"
+                + quiz_reset_text(state)
+            )
+
+        question = current_quiz_question(
+            state
+        )
+
+        number = state[
+            "tips_used"
+        ]
+
+        state[
+            "tips_used"
+        ] += 1
+
+        save_data(
+            data
+        )
+
+        await interaction.response.send_message(
+            (
+                f"💡 **Tipp {number + 1}/3**\n\n"
+                f"{question['hints'][number]}\n\n"
+                f"{quiz_remaining_text(state)}\n"
+                f"{quiz_reset_text(state)}"
+            ),
+            ephemeral=True
+        )
+
+
+class EmojiQuizLetters(
+    discord.ui.Button
+):
+    def __init__(self):
+        super().__init__(
+            label="Anfangsbuchstaben",
+            emoji="🔤",
+            style=discord.ButtonStyle.primary,
+            custom_id="rlp_emoji_letters"
+        )
+
+    async def callback(
+        self,
+        interaction
+    ):
+        state = get_quiz_state(
+            interaction.user.id
+        )
+
+        if not state["active"]:
+            return await error_response(
+                interaction,
+                "❌ Starte zuerst ein neues Quiz."
+            )
+
+        if state[
+            "letters_used"
+        ] >= EMOJI_LIMIT:
+
+            return await error_response(
+                interaction,
+                quiz_limit_message(
+                    "🔤 Anfangsbuchstaben",
+                    state["letters_used"]
+                )
+                + "\n\n"
+                + quiz_reset_text(state)
+            )
+
+        question = current_quiz_question(
+            state
+        )
+
+        answer = question[
+            "answer"
+        ]
+
+        use_number = (
+            state["letters_used"]
+            + 1
+        )
+
+        # Bei jeder Nutzung wird ein weiterer Anfangsbuchstabe
+        # des gesuchten Wortes angezeigt.
+        shown = answer[
+            :use_number
+        ]
+
+        state[
+            "letters_used"
+        ] += 1
+
+        save_data(
+            data
+        )
+
+        await interaction.response.send_message(
+            (
+                f"🔤 **Anfangsbuchstaben {use_number}/3**\n\n"
+                f"Gesucht beginnt mit: **{shown}...**\n\n"
+                f"{quiz_remaining_text(state)}\n"
+                f"{quiz_reset_text(state)}"
+            ),
+            ephemeral=True
+        )
+
+
+class EmojiQuizSkip(
+    discord.ui.Button
+):
+    def __init__(self):
+        super().__init__(
+            label="Aufgabe überspringen",
+            emoji="⏭️",
+            style=discord.ButtonStyle.secondary,
+            custom_id="rlp_emoji_skip"
+        )
+
+    async def callback(
+        self,
+        interaction
+    ):
+        state = get_quiz_state(
+            interaction.user.id
+        )
+
+        if not state["active"]:
+            return await error_response(
+                interaction,
+                "❌ Starte zuerst ein neues Quiz."
+            )
+
+        if state[
+            "skips_used"
+        ] >= EMOJI_LIMIT:
+
+            return await error_response(
+                interaction,
+                quiz_limit_message(
+                    "⏭️ Überspringen",
+                    state["skips_used"]
+                )
+                + "\n\n"
+                + quiz_reset_text(state)
+            )
+
+        old_question = current_quiz_question(
+            state
+        )
+
+        state[
+            "skips_used"
+        ] += 1
+
+        state[
+            "skipped"
+        ] += 1
+
+        quiz_pick_question(
+            state
+        )
+
+        save_data(
+            data
+        )
+
+        new_question = current_quiz_question(
+            state
+        )
+
+        await interaction.response.send_message(
+            (
+                "⏭️ **Aufgabe übersprungen.**\n\n"
+                f"Vorher: {old_question['emoji']}\n"
+                f"Neue Aufgabe: **{new_question['emoji']}**\n\n"
+                f"{quiz_remaining_text(state)}\n"
+                f"{quiz_reset_text(state)}"
+            ),
+            ephemeral=True
+        )
+
+
+class EmojiQuizLeaderboard(
+    discord.ui.Button
+):
+    def __init__(self):
+        super().__init__(
+            label="Bestenliste anzeigen",
+            emoji="🏆",
+            style=discord.ButtonStyle.secondary,
+            custom_id="rlp_emoji_leaderboard"
+        )
+
+    async def callback(
+        self,
+        interaction
+    ):
+        state = get_quiz_state(
+            interaction.user.id
+        )
+
+        result = make_embed(
+            "🏆 Deine Emoji-Quiz-Statistik",
+            (
+                "Diese Statistik ist **nur für dich sichtbar**."
+            ),
+            discord.Color.gold()
+        )
+
+        result.add_field(
+            name="⭐ Punkte",
+            value=str(
+                state["score"]
+            ),
+            inline=True
+        )
+
+        result.add_field(
+            name="✅ Gelöst",
+            value=str(
+                state["solved"]
+            ),
+            inline=True
+        )
+
+        result.add_field(
+            name="⏭️ Übersprungen",
+            value=str(
+                state["skipped"]
+            ),
+            inline=True
+        )
+
+        result.add_field(
+            name="📊 Gestartete Aufgaben",
+            value=str(
+                state["total"]
+            ),
+            inline=True
+        )
+
+        result.add_field(
+            name="💡 Tipps",
+            value=f"{state['tips_used']}/3",
+            inline=True
+        )
+
+        result.add_field(
+            name="🔤 Buchstaben",
+            value=f"{state['letters_used']}/3",
+            inline=True
+        )
+
+        result.add_field(
+            name="⏭️ Überspringen",
+            value=f"{state['skips_used']}/3",
+            inline=True
+        )
+
+        result.add_field(
+            name="🔄 Reset",
+            value=quiz_reset_text(state),
+            inline=False
+        )
+
+        await interaction.response.send_message(
+            embed=result,
+            ephemeral=True
+        )
+
+
+class EmojiQuizView(
+    discord.ui.View
+):
+    def __init__(self):
+        super().__init__(
+            timeout=None
+        )
+
+        self.add_item(
+            EmojiQuizNew()
+        )
+
+        self.add_item(
+            EmojiQuizHint()
+        )
+
+        self.add_item(
+            EmojiQuizLetters()
+        )
+
+        self.add_item(
+            EmojiQuizSkip()
+        )
+
+        self.add_item(
+            EmojiQuizLeaderboard()
+        )
+
+
+def emoji_quiz_panel():
+    return make_embed(
+        "🎭 Emoji-Quiz",
+        (
+            "Errate den Begriff anhand der Emojis.\n\n"
+            "▶️ **Neues Quiz** — startet eine neue Aufgabe.\n"
+            "💡 **Tipp anfordern** — maximal 3 Nutzungen.\n"
+            "🔤 **Anfangsbuchstaben** — maximal 3 Nutzungen.\n"
+            "⏭️ **Aufgabe überspringen** — maximal 3 Nutzungen.\n"
+            "🏆 **Bestenliste** — deine persönliche Statistik.\n\n"
+            "⚠️ Die drei Limits gelten **über mehrere Quiz-Aufgaben hinweg**.\n"
+            "🔄 Alle drei Limits werden automatisch **alle 2 Stunden** zurückgesetzt.\n\n"
+            "✍️ Deine Antwort schreibst du einfach in den Chat."
+        ),
+        discord.Color.purple()
+    )
+
+
+@bot.command(
+    name="emojiquizpanel",
+    aliases=["emojiquiz"]
+)
+async def emojiquizpanel_command(
+    ctx
+):
+    if not is_owner(
+        ctx.author
+    ):
+        return
+
+    await update_panel(
+        ctx.channel.id,
+        EMOJI_QUIZ_PANEL_MARKER,
+        emoji_quiz_panel(),
+        EmojiQuizView()
+    )
+
+    await ctx.send(
+        "✅ Emoji-Quiz-Panel aktualisiert.",
+        delete_after=5
+    )
+
+
+# =========================================================
+# ZAHLENSPIEL
+# =========================================================
+
+def number_game_state():
+    return data[
+        "number_game"
+    ]
+
+
+def number_game_panel():
+    state = number_game_state()
+
+    current = int(
+        state.get(
+            "current_number",
+            1
+        )
+    )
+
+    return make_embed(
+        "🔢 RLP Zahlenspiel",
+        (
+            "## 🔢 Hier die Zahlen von 1 – ∞\n\n"
+            f"🎯 **Als Nächstes:** `{current}`\n\n"
+            "📌 **Regeln**\n"
+            "• Schreibe immer die nächste Zahl.\n"
+            "• Die gleiche Person darf nicht zweimal "
+            "hintereinander richtig zählen.\n"
+            "• Eine falsche Zahl setzt das Spiel wieder auf **1**.\n"
+            "• Jede richtige Zahl wird mit ✅ bestätigt.\n"
+            "• Falsche Zahlen werden mit ❌ markiert.\n"
+            "• Bei 100, 200, 300 usw. gibt es ein Easter Egg. 🎉\n\n"
+            "⚠️ Mehrfach falsche Eingaben können automatisch "
+            "zu einem Timeout führen."
+        ),
+        discord.Color.blurple()
+    )
+
+
+class NumberGameView(
+    discord.ui.View
+):
+    def __init__(self):
+        super().__init__(
+            timeout=None
+        )
+
+        self.add_item(
+            NumberGameInfo()
+        )
+
+
+class NumberGameInfo(
+    discord.ui.Button
+):
+    def __init__(self):
+        super().__init__(
+            label="Spielregeln",
+            emoji="📖",
+            style=discord.ButtonStyle.secondary,
+            custom_id="rlp_number_rules"
+        )
+
+    async def callback(
+        self,
+        interaction
+    ):
+        await interaction.response.send_message(
+            (
+                "📖 **Zahlenspiel-Regeln**\n\n"
+                "1️⃣ Immer die nächste erwartete Zahl schreiben.\n"
+                "2️⃣ Zwei richtige Zahlen hintereinander "
+                "vom selben User sind nicht erlaubt.\n"
+                "3️⃣ Eine falsche Zahl setzt auf **1** zurück.\n"
+                "4️⃣ Bei jeder richtigen Zahl gibt es ✅.\n"
+                "5️⃣ Bei jeder falschen Zahl gibt es ❌.\n"
+                "6️⃣ Bei 100/200/300/... gibt es ein Easter Egg.\n"
+                "7️⃣ Wiederholte Fehlversuche können einen Timeout auslösen."
+            ),
+            ephemeral=True
+        )
+
+
+async def refresh_number_game_panel():
+    await update_panel(
+        NUMBER_GAME_CHANNEL_ID,
+        NUMBER_GAME_PANEL_MARKER,
+        number_game_panel(),
+        NumberGameView()
+    )
+
+
+def number_timeout_minutes(
+    wrong_count
+):
+    """
+    4 Fehler  -> 5 Minuten
+    14 Fehler -> 10 Minuten
+    24 Fehler -> 15 Minuten
+    34 Fehler -> 20 Minuten
+    usw.
+
+    Damit wird nach dem ersten 4er-Block nicht jeder Fehler
+    einzeln bestraft, sondern die Strafe steigt blockweise.
+    """
+
+    if wrong_count < 4:
+        return 0
+
+    if wrong_count == 4:
+        return 5
+
+    additional = (
+        wrong_count - 4
+    ) // 10
+
+    return 5 + (
+        additional * 5
+    )
+
+
+def number_easter_egg(
+    number
+):
+    eggs = {
+        100: "💯 **100!** Stark! Die erste dreistellige Marke ist erreicht! 🔥",
+        200: "🎉 **200!** Ihr seid weiter unterwegs. RLP zählt weiter!",
+        300: "🚀 **300!** Das Zahlenspiel nimmt Fahrt auf!",
+        400: "🔥 **400!** Schon wieder eine Hunderter-Marke!",
+        500: "👑 **500!** Halbtausend geschafft!",
+        1000: "🏆 **1000!** VIERSTELLIG! Was für eine Zahl!",
+    }
+
+    return eggs.get(
+        number,
+        f"🎉 **{number}!** Eine weitere Hunderter-Marke wurde erreicht!"
+    )
+
+
+async def handle_number_game(
+    message
+):
+    if message.channel.id != NUMBER_GAME_CHANNEL_ID:
+        return False
+
+    # Keine Bot-Nachrichten
+    if message.author.bot:
+        return True
+
+    content = message.content.strip()
+
+    # Nur reine Ganzzahlen behandeln.
+    # Normale Chatnachrichten bleiben normal.
+    if not re.fullmatch(
+        r"\d+",
+        content
+    ):
+        return False
+
+    try:
+        number = int(
+            content
+        )
+    except ValueError:
+        return True
+
+    state = number_game_state()
+
+    expected = int(
+        state.get(
+            "current_number",
+            1
+        )
+    )
+
+    last_user_id = state.get(
+        "last_user_id"
+    )
+
+    # =====================================================
+    # GLEICHER USER ZWEIMAL HINTEREINANDER
+    # =====================================================
+
+    if (
+        number == expected
+        and last_user_id == message.author.id
+    ):
+        try:
+            await message.add_reaction(
+                "⚠️"
+            )
+        except Exception:
+            pass
+
+        await message.channel.send(
+            (
+                f"⚠️ {message.author.mention} "
+                "Du darfst nicht zweimal hintereinander "
+                "eine richtige Zahl schreiben.\n"
+                f"🎯 Weiter geht es mit **{expected}**."
+            ),
+            delete_after=7
+        )
+
+        return True
+
+    # =====================================================
+    # RICHTIGE ZAHL
+    # =====================================================
+
+    if number == expected:
+
+        try:
+            await message.add_reaction(
+                "✅"
+            )
+        except Exception:
+            pass
+
+        state[
+            "current_number"
+        ] = expected + 1
+
+        state[
+            "last_user_id"
+        ] = message.author.id
+
+        save_data(
+            data
+        )
+
+        await refresh_number_game_panel()
+
+        # Easter Egg genau bei 100 / 200 / 300 usw.
+        if number % 100 == 0:
+            egg = number_easter_egg(
+                number
+            )
+
+            await message.channel.send(
+                embed=make_embed(
+                    "🎉 EASTER EGG",
+                    egg,
+                    discord.Color.gold()
+                ),
+                delete_after=12
+            )
+
+        return True
+
+    # =====================================================
+    # FALSCHE ZAHL
+    # =====================================================
+
+    try:
+        await message.add_reaction(
+            "❌"
+        )
+    except Exception:
+        pass
+
+    user_key = str(
+        message.author.id
+    )
+
+    wrong_attempts = state[
+        "wrong_attempts"
+    ]
+
+    wrong_attempts[
+        user_key
+    ] = int(
+        wrong_attempts.get(
+            user_key,
+            0
+        )
+    ) + 1
+
+    count = wrong_attempts[
+        user_key
+    ]
+
+    # Spiel IMMER auf 1 zurücksetzen
+    state[
+        "current_number"
+    ] = 1
+
+    state[
+        "last_user_id"
+    ] = None
+
+    save_data(
+        data
+    )
+
+    timeout_minutes = number_timeout_minutes(
+        count
+    )
+
+    member = message.author
+
+    if (
+        timeout_minutes > 0
+        and isinstance(
+            member,
+            discord.Member
+        )
+    ):
+        try:
+            until = (
+                discord.utils.utcnow()
+                + timedelta(
+                    minutes=timeout_minutes
+                )
+            )
+
+            await member.timeout(
+                until,
+                reason=(
+                    "RLP Zahlenspiel: "
+                    f"{count} falsche Eingaben"
+                )
+            )
+
+            await message.channel.send(
+                (
+                    f"❌ {member.mention} hat die falsche Zahl "
+                    f"geschrieben.\n"
+                    f"🔄 Das Zahlenspiel beginnt wieder bei **1**.\n\n"
+                    f"⚠️ Fehlversuche: **{count}**\n"
+                    f"⏱️ Timeout: **{timeout_minutes} Minuten**"
+                ),
+                delete_after=10
+            )
+
+        except discord.Forbidden:
+            await message.channel.send(
+                (
+                    f"❌ {member.mention} hat die falsche Zahl "
+                    f"geschrieben.\n"
+                    f"🔄 Das Zahlenspiel beginnt wieder bei **1**.\n\n"
+                    f"⚠️ Fehlversuche: **{count}**\n"
+                    f"❗ Der Timeout konnte wegen fehlender "
+                    f"Bot-Berechtigungen nicht gesetzt werden."
+                ),
+                delete_after=10
+            )
+
+        except Exception as error:
+            print(
+                f"Zahlenspiel Timeout: {error}"
+            )
+
+    else:
+        await message.channel.send(
+            (
+                f"❌ {member.mention} hat die falsche Zahl "
+                f"geschrieben.\n"
+                f"🔄 Das Zahlenspiel beginnt wieder bei **1**.\n"
+                f"⚠️ Fehlversuche dieser Person: **{count}**"
+            ),
+            delete_after=8
+        )
+
+    await refresh_number_game_panel()
+
+    return True
+
+
+@bot.command(
+    name="zahlenspiel",
+    aliases=["numbergame"]
+)
+async def numbergame_command(
+    ctx
+):
+    if not is_owner(
+        ctx.author
+    ):
+        return
+
+    await refresh_number_game_panel()
+
+    await ctx.send(
+        f"✅ Zahlenspiel-Panel wurde in "
+        f"<#{NUMBER_GAME_CHANNEL_ID}> aktualisiert.",
+        delete_after=6
+    )
+
+
+@bot.command(
+    name="zahlenspielreset"
+)
+async def numbergame_reset_command(
+    ctx
+):
+    if not is_owner(
+        ctx.author
+    ):
+        return
+
+    data[
+        "number_game"
+    ] = {
+        "current_number": 1,
+        "last_user_id": None,
+        "wrong_attempts": {},
+        "message_id": None,
+        "last_easter_egg": 0
+    }
+
+    save_data(
+        data
+    )
+
+    await refresh_number_game_panel()
+
+    await ctx.send(
+        "🔄 Zahlenspiel wurde vollständig auf **1** zurückgesetzt.",
+        delete_after=6
+    )
+
+
+# =========================================================
 # OWNER SYSTEM
 # =========================================================
 
@@ -2708,7 +4164,9 @@ class UserInfoButton(
 
         result.add_field(
             name="ID",
-            value=str(member.id),
+            value=str(
+                member.id
+            ),
             inline=True
         )
 
@@ -2824,6 +4282,7 @@ class ClearMessagesModal(
             amount = int(
                 self.amount.value
             )
+
         except ValueError:
             return await error_response(
                 interaction,
@@ -2962,7 +4421,9 @@ class GiveawayModal(
             )
 
         end_time = (
-            datetime.now(timezone.utc)
+            datetime.now(
+                timezone.utc
+            )
             + timedelta(
                 minutes=duration
             )
@@ -3045,12 +4506,16 @@ async def finish_giveaway(
         if reaction:
             async for user in reaction.users():
                 if not user.bot:
-                    users.append(user)
+                    users.append(
+                        user
+                    )
 
         unique = {}
 
         for user in users:
-            unique[user.id] = user
+            unique[
+                user.id
+            ] = user
 
         users = list(
             unique.values()
@@ -3339,15 +4804,19 @@ async def communitypanel_command(
     ):
         return
 
+    # =====================================================
+    # COMMUNITY PANEL ABSICHTLICH IM AKTUELLEN CHANNEL
+    # =====================================================
+
     await update_panel(
-        SUGGESTION_CHANNEL_ID,
+        ctx.channel.id,
         COMMUNITY_PANEL_MARKER,
         community_panel(),
         CommunityView()
     )
 
     await ctx.send(
-        "✅ Community-Panel aktualisiert.",
+        "✅ Community-Panel wurde in diesem Channel aktualisiert.",
         delete_after=5
     )
 
@@ -3362,6 +4831,10 @@ async def ownerpanel_command(
         ctx.author
     ):
         return
+
+    # =====================================================
+    # OWNER PANEL ABSICHTLICH IM AKTUELLEN CHANNEL
+    # =====================================================
 
     await update_panel(
         ctx.channel.id,
@@ -3403,6 +4876,23 @@ async def help_command(
         discord.Color.blurple()
     )
 
+    result.add_field(
+        name="🎭 Emoji-Quiz",
+        value=(
+            "`?emojiquizpanel`"
+        ),
+        inline=False
+    )
+
+    result.add_field(
+        name="🔢 Zahlenspiel",
+        value=(
+            "`?zahlenspiel`\n"
+            "`?zahlenspielreset`"
+        ),
+        inline=False
+    )
+
     if is_owner(
         ctx.author
     ):
@@ -3427,7 +4917,7 @@ async def help_command(
 
 
 # =========================================================
-# COMMAND FEHLER
+# COMMAND ERROR
 # =========================================================
 
 @bot.event
@@ -3559,6 +5049,14 @@ async def on_ready():
             OwnerView()
         )
 
+        bot.add_view(
+            EmojiQuizView()
+        )
+
+        bot.add_view(
+            NumberGameView()
+        )
+
     except Exception as error:
         print(
             f"View-Registrierung: {error}"
@@ -3569,6 +5067,7 @@ async def on_ready():
     )
 
     try:
+        # Alte Panels: ihre bisherigen festen Channels
         await update_panel(
             NAMETAG_CHANNEL_ID,
             NAMETAG_PANEL_MARKER,
@@ -3594,12 +5093,16 @@ async def on_ready():
 
         await refresh_shift_panel()
 
-        await update_panel(
-            SUGGESTION_CHANNEL_ID,
-            COMMUNITY_PANEL_MARKER,
-            community_panel(),
-            CommunityView()
-        )
+        # Community: NICHT automatisch in den festen
+        # Suggestions-Channel verschieben.
+        # Es wird nur über ?communitypanel im aktuellen
+        # Channel erstellt/aktualisiert.
+
+        # Owner: ebenfalls nur über ?ownerpanel / ?owner
+        # im aktuellen Channel.
+
+        # Neues Zahlenspiel: fester Channel
+        await refresh_number_game_panel()
 
         print(
             "Panels aktualisiert."
@@ -3611,12 +5114,103 @@ async def on_ready():
         )
 
 
+# =========================================================
+# ON MESSAGE
+# =========================================================
+
 @bot.event
 async def on_message(
     message
 ):
     if message.author.bot:
         return
+
+    # Zahlenspiel zuerst behandeln.
+    # Nur reine Zahlen im Zahlenspiel-Channel werden
+    # vom Zahlenspiel verarbeitet.
+    if message.channel.id == NUMBER_GAME_CHANNEL_ID:
+
+        handled = await handle_number_game(
+            message
+        )
+
+        if handled:
+            return
+
+    # =====================================================
+    # EMOJI QUIZ ANTWORTEN
+    # =====================================================
+
+    if message.guild and not message.content.startswith(
+        PREFIX
+    ):
+        state = get_quiz_state(
+            message.author.id
+        )
+
+        if state.get(
+            "active",
+            False
+        ):
+            question = current_quiz_question(
+                state
+            )
+
+            if question:
+                given = normalize_quiz_answer(
+                    message.content
+                )
+
+                aliases = [
+                    normalize_quiz_answer(
+                        value
+                    )
+                    for value in question.get(
+                        "aliases",
+                        []
+                    )
+                ]
+
+                correct = (
+                    given in aliases
+                    or given == normalize_quiz_answer(
+                        question["answer"]
+                    )
+                )
+
+                if correct:
+                    state[
+                        "active"
+                    ] = False
+
+                    state[
+                        "score"
+                    ] += 1
+
+                    state[
+                        "solved"
+                    ] += 1
+
+                    save_data(
+                        data
+                    )
+
+                    await message.channel.send(
+                        embed=make_embed(
+                            "✅ Richtig!",
+                            (
+                                f"{message.author.mention} hat "
+                                f"**{question['answer']}** richtig erraten! 🎉\n\n"
+                                f"⭐ Punkt: **+1**\n"
+                                f"🏆 Gesamtpunkte: **{state['score']}**\n\n"
+                                "Starte über das Panel eine neue Aufgabe."
+                            ),
+                            discord.Color.green()
+                        ),
+                        delete_after=10
+                    )
+
+                    return
 
     await bot.process_commands(
         message
@@ -3668,7 +5262,9 @@ def start_bot():
                 "🔄 Neustart in 5 Sekunden..."
             )
 
-            time.sleep(5)
+            time.sleep(
+                5
+            )
 
 
 if __name__ == "__main__":
